@@ -1,45 +1,25 @@
-import { createProxy, createMMKVBackend, awaitSyncWrapper } from "@vendetta/storage";
+import { createMMKVBackend, createStorage, wrapSync, createProxy, awaitSyncWrapper } from "@vendetta/storage";
 
 export interface NetherSettings {
-    // Anti-Log
     antiTyping: boolean;
     antiRead: boolean;
     antiPurgeLog: boolean;
     messageLogger: boolean;
-
-    // Purge
     purgeDelay: number;
     purgeConfirm: boolean;
-
-    // Automation
     afkEnabled: boolean;
     afkMessage: string;
     afkDelay: number;
     schedulerEnabled: boolean;
     autoReactEnabled: boolean;
-    autoReactRules: AutoReactRule[];
+    autoReactRules: any[];
     notifBypassEnabled: boolean;
-
-    // Tweaks
     ghostPings: boolean;
     spamGuardEnabled: boolean;
     spamGuardThreshold: number;
     spamGuardCooldown: number;
     filtersEnabled: boolean;
-    filterRules: FilterRule[];
-}
-
-export interface AutoReactRule {
-    id: string;
-    channelId?: string;
-    userId?: string;
-    emoji: string;
-}
-
-export interface FilterRule {
-    id: string;
-    type: "user" | "regex" | "bot";
-    value: string;
+    filterRules: any[];
 }
 
 const defaults: NetherSettings = {
@@ -47,10 +27,8 @@ const defaults: NetherSettings = {
     antiRead: false,
     antiPurgeLog: false,
     messageLogger: false,
-
     purgeDelay: 500,
     purgeConfirm: true,
-
     afkEnabled: false,
     afkMessage: "I'm currently AFK. I'll get back to you later.",
     afkDelay: 3000,
@@ -58,7 +36,6 @@ const defaults: NetherSettings = {
     autoReactEnabled: false,
     autoReactRules: [],
     notifBypassEnabled: false,
-
     ghostPings: true,
     spamGuardEnabled: false,
     spamGuardThreshold: 10,
@@ -71,16 +48,20 @@ let storage: NetherSettings;
 
 export async function initStorage(): Promise<void> {
     const backend = createMMKVBackend("nether-settings");
-    const raw = await createStorage<NetherSettings>(backend);
-    await awaitSyncWrapper(raw);
+    let raw: NetherSettings;
+    try {
+        const result = await createStorage<NetherSettings>(backend);
+        wrapSync(result);
+        raw = result as unknown as NetherSettings;
+    } catch {
+        raw = { ...defaults };
+    }
 
-    // Merge defaults for any missing keys
     const merged = { ...defaults, ...raw };
     backend.set(merged);
 
-    const { proxy, emitter } = createProxy(merged as NetherSettings);
+    const { proxy } = createProxy(merged);
     storage = proxy;
-    (storage as any)._emitter = emitter;
 }
 
 export function getStorage(): NetherSettings {
