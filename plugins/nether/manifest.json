@@ -1,0 +1,14 @@
+{
+    "name": "Nether",
+    "description": "All-in-one Revenge toolkit: anti-logging, purge, automation, and chat tweaks.",
+    "authors": [
+        {
+            "name": "skidding",
+            "id": "1431679910296158281"
+        }
+    ],
+    "main": "src/index.ts",
+    "vendetta": {
+        "icon": "ic_badge_staff"
+    }
+}
