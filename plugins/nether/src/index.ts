@@ -1,6 +1,5 @@
 import { logger } from "@vendetta";
 import { initStorage, getStorage } from "./storage";
-import { loadSettings } from "./Settings";
 import Settings from "./Settings";
 import { initServerButton } from "./serverlist";
 
@@ -22,7 +21,6 @@ export default {
     onLoad: async () => {
         logger.log("[Nether] Loading...");
         await initStorage();
-        loadSettings();
 
         // Server list button — tap to open settings
         unloads.push(initServerButton(() => {
