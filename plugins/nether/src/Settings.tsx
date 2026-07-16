@@ -1,171 +1,126 @@
 import { useState } from "react";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
-import { useProxy } from "@vendetta/storage";
-import { createStorage, wrapSync, createMMKVBackend } from "@vendetta/storage";
-import { showInputAlert } from "@vendetta/ui/alerts";
+import { createMMKVBackend, createStorage, wrapSync } from "@vendetta/storage";
 
-const { FormSection, FormRow, FormSwitch, FormInput, FormDivider, FormText } = Forms;
+const { FormSection, FormRow, FormSwitch, FormInput, FormDivider } = Forms;
 const { ScrollView, TouchableOpacity, Text, View } = ReactNative;
 
 type Tab = "antillog" | "purge" | "automation" | "tweaks";
 
-// Direct defaults — will be replaced once storage loads
 const defaults = {
     antiTyping: false, antiRead: false, antiPurgeLog: false, messageLogger: false,
     purgeDelay: 500, purgeConfirm: true,
     afkEnabled: false, afkMessage: "I'm currently AFK.", afkDelay: 3000,
-    schedulerEnabled: false, autoReactEnabled: false, autoReactRules: [] as any[],
-    notifBypassEnabled: false,
+    schedulerEnabled: false, autoReactEnabled: false, notifBypassEnabled: false,
     ghostPings: true, spamGuardEnabled: false, spamGuardThreshold: 10,
-    spamGuardCooldown: 60000, filtersEnabled: false, filterRules: [] as any[],
+    spamGuardCooldown: 60000, filtersEnabled: false,
 };
 
 let settings: any = { ...defaults };
 
-async function loadSettings() {
+export function loadSettings() {
     try {
         const backend = createMMKVBackend("nether-settings");
-        const raw = await createStorage(backend);
-        wrapSync(raw);
-        const stored = backend.get() as any || {};
-        settings = { ...defaults, ...stored };
-        return settings;
-    } catch (e) {
-        console.log("[Nether] Settings load failed, using defaults", e);
-        return settings;
-    }
+        const raw = backend.get() as any || {};
+        settings = { ...defaults, ...raw };
+    } catch { /* use defaults */ }
 }
 
-function saveSettings() {
+function save() {
     try {
-        const { createMMKVBackend } = require("@vendetta/storage");
         const backend = createMMKVBackend("nether-settings");
         backend.set(settings);
-    } catch (e) {
-        console.log("[Nether] Settings save failed", e);
-    }
+    } catch { /* empty */ }
 }
 
-function TabContent({ tab }: { tab: Tab }) {
-    if (tab === "antillog") return (
+function S({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (v: boolean) => void }) {
+    return (
+        <FormRow
+            label={label}
+            trailing={<FormSwitch value={value} onValueChange={onValueChange} />}
+        />
+    );
+}
+
+function AntiLogTab() {
+    return (
         <View>
             <FormSection title="Anti-Logging">
-                <FormSwitch
-                    label="Anti-Typing"
-                    value={!!settings.antiTyping}
-                    onValueChange={(v: any) => { settings.antiTyping = v; saveSettings(); }}
-                />
+                <S label="Anti-Typing" value={!!settings.antiTyping} onValueChange={(v) => { settings.antiTyping = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Anti-Read Receipts"
-                    value={!!settings.antiRead}
-                    onValueChange={(v: any) => { settings.antiRead = v; saveSettings(); }}
-                />
+                <S label="Anti-Read Receipts" value={!!settings.antiRead} onValueChange={(v) => { settings.antiRead = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Anti-Purge Log"
-                    value={!!settings.antiPurgeLog}
-                    onValueChange={(v: any) => { settings.antiPurgeLog = v; saveSettings(); }}
-                />
+                <S label="Anti-Purge Log" value={!!settings.antiPurgeLog} onValueChange={(v) => { settings.antiPurgeLog = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Message Logger"
-                    value={!!settings.messageLogger}
-                    onValueChange={(v: any) => { settings.messageLogger = v; saveSettings(); }}
-                />
+                <S label="Message Logger" value={!!settings.messageLogger} onValueChange={(v) => { settings.messageLogger = v; save(); }} />
             </FormSection>
         </View>
     );
-    if (tab === "purge") return (
+}
+
+function PurgeTab() {
+    return (
         <View>
             <FormSection title="Purge Settings">
                 <FormInput
                     title="Rate Limit Delay (ms)"
                     value={String(settings.purgeDelay)}
-                    placeholder="500"
-                    onChange={(v: string) => { settings.purgeDelay = parseInt(v) || 500; saveSettings(); }}
+                    onChange={(v: string) => { settings.purgeDelay = parseInt(v) || 500; save(); }}
                 />
                 <FormDivider />
-                <FormSwitch
-                    label="Confirm Before Purge"
-                    value={!!settings.purgeConfirm}
-                    onValueChange={(v: any) => { settings.purgeConfirm = v; saveSettings(); }}
-                />
+                <S label="Confirm Before Purge" value={!!settings.purgeConfirm} onValueChange={(v) => { settings.purgeConfirm = v; save(); }} />
             </FormSection>
-            <FormSection title="Slash Commands">
+            <FormSection title="Commands">
                 <FormRow label="/nether purge [count]" />
                 <FormDivider />
                 <FormRow label="/nether purge-user @user [count]" />
             </FormSection>
         </View>
     );
-    if (tab === "automation") return (
+}
+
+function AutomationTab() {
+    return (
         <View>
             <FormSection title="AFK Mode">
-                <FormSwitch
-                    label="Enable AFK"
-                    value={!!settings.afkEnabled}
-                    onValueChange={(v: any) => { settings.afkEnabled = v; saveSettings(); }}
-                />
+                <S label="Enable AFK" value={!!settings.afkEnabled} onValueChange={(v) => { settings.afkEnabled = v; save(); }} />
                 <FormDivider />
                 <FormInput
                     title="AFK Message"
                     value={String(settings.afkMessage)}
-                    onChange={(v: string) => { settings.afkMessage = v; saveSettings(); }}
+                    onChange={(v: string) => { settings.afkMessage = v; save(); }}
                 />
                 <FormDivider />
                 <FormInput
-                    title="AFK Reply Delay (ms)"
+                    title="Reply Delay (ms)"
                     value={String(settings.afkDelay)}
-                    onChange={(v: string) => { settings.afkDelay = parseInt(v) || 3000; saveSettings(); }}
+                    onChange={(v: string) => { settings.afkDelay = parseInt(v) || 3000; save(); }}
                 />
             </FormSection>
-            <FormSection title="Automation">
-                <FormSwitch
-                    label="Message Scheduler"
-                    value={!!settings.schedulerEnabled}
-                    onValueChange={(v: any) => { settings.schedulerEnabled = v; saveSettings(); }}
-                />
+            <FormSection title="Other">
+                <S label="Message Scheduler" value={!!settings.schedulerEnabled} onValueChange={(v) => { settings.schedulerEnabled = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Auto-React"
-                    value={!!settings.autoReactEnabled}
-                    onValueChange={(v: any) => { settings.autoReactEnabled = v; saveSettings(); }}
-                />
+                <S label="Auto-React" value={!!settings.autoReactEnabled} onValueChange={(v) => { settings.autoReactEnabled = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Notification Bypass"
-                    value={!!settings.notifBypassEnabled}
-                    onValueChange={(v: any) => { settings.notifBypassEnabled = v; saveSettings(); }}
-                />
+                <S label="Notification Bypass (Experimental)" value={!!settings.notifBypassEnabled} onValueChange={(v) => { settings.notifBypassEnabled = v; save(); }} />
             </FormSection>
         </View>
     );
-    if (tab === "tweaks") return (
+}
+
+function TweaksTab() {
+    return (
         <View>
             <FormSection title="Chat Tweaks">
-                <FormSwitch
-                    label="Ghost Pings"
-                    value={!!settings.ghostPings}
-                    onValueChange={(v: any) => { settings.ghostPings = v; saveSettings(); }}
-                />
+                <S label="Ghost Pings" value={!!settings.ghostPings} onValueChange={(v) => { settings.ghostPings = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Spam Guard"
-                    value={!!settings.spamGuardEnabled}
-                    onValueChange={(v: any) => { settings.spamGuardEnabled = v; saveSettings(); }}
-                />
+                <S label="Spam Guard" value={!!settings.spamGuardEnabled} onValueChange={(v) => { settings.spamGuardEnabled = v; save(); }} />
                 <FormDivider />
-                <FormSwitch
-                    label="Custom Filters"
-                    value={!!settings.filtersEnabled}
-                    onValueChange={(v: any) => { settings.filtersEnabled = v; saveSettings(); }}
-                />
+                <S label="Custom Filters" value={!!settings.filtersEnabled} onValueChange={(v) => { settings.filtersEnabled = v; save(); }} />
             </FormSection>
         </View>
     );
-    return null;
 }
 
 const tabs = [
@@ -175,7 +130,7 @@ const tabs = [
     { key: "tweaks" as Tab, label: "Tweaks" },
 ];
 
-export default () => {
+export default function SettingsPanel() {
     const [tab, setTab] = useState<Tab>("antillog");
 
     return (
@@ -203,7 +158,10 @@ export default () => {
                     </TouchableOpacity>
                 ))}
             </View>
-            <TabContent tab={tab} />
+            {tab === "antillog" && <AntiLogTab />}
+            {tab === "purge" && <PurgeTab />}
+            {tab === "automation" && <AutomationTab />}
+            {tab === "tweaks" && <TweaksTab />}
         </ScrollView>
     );
-};
+}
