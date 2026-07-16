@@ -5,7 +5,7 @@ on:
         branches: [main, master]
 
 permissions:
-    contents: write
+    contents: read
     pages: write
     id-token: write
 
@@ -14,7 +14,7 @@ concurrency:
     cancel-in-progress: false
 
 jobs:
-    deploy:
+    build:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -31,14 +31,19 @@ jobs:
             - name: Build plugin(s)
               run: pnpm run build
 
-            - name: Copy README
-              run: cp README.md dist/README.md
-
             - name: Disable Jekyll
               run: touch dist/.nojekyll
 
-            - uses: peaceiris/actions-gh-pages@v4
+            - uses: actions/upload-pages-artifact@v3
               with:
-                github_token: ${{ secrets.GITHUB_TOKEN }}
-                publish_dir: ./dist
-                enable_jekyll: false
+                path: dist
+
+    deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - id: deployment
+              uses: actions/deploy-pages@v4
