@@ -34,8 +34,11 @@ jobs:
             - name: Copy README
               run: cp README.md dist/README.md
 
+            - name: Disable Jekyll
+              run: touch dist/.nojekyll
+
             - uses: peaceiris/actions-gh-pages@v4
               with:
                 github_token: ${{ secrets.GITHUB_TOKEN }}
                 publish_dir: ./dist
-                enable_jekyll: true
+                enable_jekyll: false
