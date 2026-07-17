@@ -6,17 +6,29 @@ import { logger } from "@vendetta";
 // Intercept all FluxDispatcher actions for debugging
 // Enabled by the "Debug Mode" toggle in Settings
 export function initDebug(): () => void {
-    // On first load, dump all metro components containing "Guild" in their name
+    // Dump all metro component displayNames on every load
     // This helps identify the correct component name for the guild sidebar button
     try {
         const all = findAll(() => true) as any[];
-        const guildComps = all
-            .filter(m => m && (m.displayName?.includes("Guild") || m.name?.includes("Guild")))
+        const comps = all
+            .filter(m => m && (m.displayName || m.name))
             .map(m => ({ displayName: m.displayName, name: m.name }));
-        if (guildComps.length > 0) {
-            logger.log("[Nether] Found guild components: " + JSON.stringify(guildComps));
+        // Filter to likely sidebar/guild related names
+        const keywords = ["Guild", "Sidebar", "Server", "Channel", "Home", "List", "Bar", "Nav"];
+        const matches = comps.filter(c =>
+            (c.displayName && keywords.some(k => c.displayName.includes(k))) ||
+            (c.name && keywords.some(k => c.name.includes(k)))
+        );
+        if (matches.length > 0) {
+            logger.log("[Nether] Sidebar components: " + JSON.stringify(matches));
+        } else {
+            // Log a sample of all components to see what's available
+            const sample = comps.slice(0, 20);
+            logger.log("[Nether] First 20 components: " + JSON.stringify(sample));
         }
-    } catch {}
+    } catch (e: any) {
+        logger.error("[Nether] Component scan failed: " + e.message);
+    }
 
     const unpatch = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         if (!storage.debugMode) return;
