@@ -1,6 +1,6 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
-import { getStorage, FilterRule } from "../storage";
+import { storage, FilterRule } from "../storage";
 import { logger } from "@vendetta";
 
 function matchesRule(rule: FilterRule, message: any, ownUserId: string): boolean {
@@ -30,11 +30,11 @@ export function initFilters(): () => void {
 
     const unpatch = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().filtersEnabled) return;
+        if (!storage.filtersEnabled) return;
 
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const m = action.message;
-            const rules = getStorage().filterRules;
+            const rules = storage.filterRules;
 
             // Don't filter own messages
             if (m.author?.id === ownUserId) return;

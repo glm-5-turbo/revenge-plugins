@@ -1,7 +1,7 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta";
 
@@ -38,7 +38,7 @@ export function initMessageLogger(): () => void {
     // Hook MESSAGE_CREATE to cache all incoming messages
     const unpatchCreate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().messageLogger) return;
+        if (!storage.messageLogger) return;
 
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const m = action.message;
@@ -56,7 +56,7 @@ export function initMessageLogger(): () => void {
     // Hook MESSAGE_DELETE to show cached content
     const unpatchDelete = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().messageLogger) return;
+        if (!storage.messageLogger) return;
 
         if (action?.type === "MESSAGE_DELETE") {
             const msgId = action.id;
@@ -79,7 +79,7 @@ export function initMessageLogger(): () => void {
     // Hook MESSAGE_UPDATE for edit logging
     const unpatchUpdate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().messageLogger) return;
+        if (!storage.messageLogger) return;
 
         if (action?.type === "MESSAGE_UPDATE" && action.message) {
             const msgId = action.message.id;

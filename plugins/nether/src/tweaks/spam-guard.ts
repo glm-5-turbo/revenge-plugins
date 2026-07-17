@@ -1,7 +1,7 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 const messageCounts: Record<string, { count: number; lastReset: number; muted: boolean; mutedAt: number }> = {};
@@ -23,7 +23,7 @@ function resetIfExpired(stats: ReturnType<typeof getChannelStats>, windowMs: num
 export function initSpamGuard(): () => void {
     const unpatch = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().spamGuardEnabled) return;
+        if (!storage.spamGuardEnabled) return;
 
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const channelId = action.message.channel_id;
@@ -31,8 +31,8 @@ export function initSpamGuard(): () => void {
             resetIfExpired(stats);
             stats.count++;
 
-            const threshold = getStorage().spamGuardThreshold;
-            const cooldown = getStorage().spamGuardCooldown;
+            const threshold = storage.spamGuardThreshold;
+            const cooldown = storage.spamGuardCooldown;
 
             // Check if muted and cooldown expired
             if (stats.muted && Date.now() - stats.mutedAt > cooldown) {

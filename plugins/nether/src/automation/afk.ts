@@ -2,7 +2,7 @@ import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { discordApi } from "../utils";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 let ownUserId = "";
@@ -33,13 +33,16 @@ function isMentioned(content: string, userId: string): boolean {
 }
 
 export function initAFK(): () => void {
+    // Initialize from storage
+    afkActive = storage.afkEnabled;
+
     const unpatchCreate = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
         const action = args[0];
-        if (!getStorage().afkEnabled || !afkActive) return;
+        if (!storage.afkEnabled || !afkActive) return;
 
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const m = action.message;
-            // Ignore own messages and DMs from bots
+            // Ignore DMs from bots
             if (m.author?.bot) return;
 
             const userId = await getOwnUserId();
@@ -54,8 +57,8 @@ export function initAFK(): () => void {
 
             if (isMentioned(m.content, userId)) {
                 const channelId = m.channel_id;
-                const replyMsg = getStorage().afkMessage;
-                const delay = getStorage().afkDelay;
+                const replyMsg = storage.afkMessage;
+                const delay = storage.afkDelay;
 
                 if (afkTimeout) clearTimeout(afkTimeout);
                 afkTimeout = setTimeout(async () => {
@@ -74,11 +77,7 @@ export function initAFK(): () => void {
         }
     });
 
-    // Watch for AFK toggle in storage
-    const storage = getStorage();
-    const origAntiTyping = storage.antiTyping;
-
-    // Expose toggle function
+    // Expose toggle function for Settings UI to call
     (globalThis as any).__nether_setAFK = (enabled: boolean) => {
         afkActive = enabled;
         if (enabled) showToast("💤 AFK mode enabled.");

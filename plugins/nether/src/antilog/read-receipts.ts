@@ -1,13 +1,13 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 export function initAntiRead(): () => void {
     // Block dispatches that mark messages as read
     const unpatch = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().antiRead) return;
+        if (!storage.antiRead) return;
 
         // MESSAGE_ACK = server ack of read state
         // UPDATE_READ_STATE = client marking channel as read

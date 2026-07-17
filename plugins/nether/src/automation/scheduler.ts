@@ -1,5 +1,5 @@
 import { discordApi, sleep } from "../utils";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";
 
@@ -42,7 +42,7 @@ function stopScheduler(): void {
 }
 
 export function initScheduler(): () => void {
-    if (getStorage().schedulerEnabled) startScheduler();
+    if (storage.schedulerEnabled) startScheduler();
 
     logger.log("[Nether] Scheduler initialized.");
     return () => {

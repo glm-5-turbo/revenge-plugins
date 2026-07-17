@@ -1,177 +1,171 @@
 import { registerCommand } from "@vendetta/commands";
+import { findByProps } from "@vendetta";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { showToast } from "@vendetta/ui/toasts";
-import { discordApi, RateLimiter, sleep } from "../utils";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
-let purgeLimiter: RateLimiter;
 let unregCommand: (() => void) | null = null;
 
-async function fetchChannelMessages(channelId: string, limit: number): Promise<any[]> {
-    const data = await discordApi("GET", `/channels/${channelId}/messages?limit=${Math.min(limit, 100)}`);
-    return data || [];
+// Use Discord's built-in HTTP module (already authenticated)
+function getHTTP(): any {
+    try {
+        const http = findByProps("get", "post", "put", "delete", "patch");
+        if (http?.get) return http;
+    } catch {}
+    try {
+        const http = findByProps("HTTP", "request");
+        if (http?.HTTP) return http.HTTP;
+    } catch {}
+    // Fallback: try the window vendetta object
+    try {
+        const v = (window as any).vendetta;
+        if (v?.http) return v.http;
+    } catch {}
+    return null;
 }
 
-async function purgeMessages(channelId: string, messageIds: string[]): Promise<void> {
-    if (!purgeLimiter) {
-        purgeLimiter = new RateLimiter(getStorage().purgeDelay);
-    }
+async function discordRequest(method: string, path: string, body?: any): Promise<any> {
+    const http = getHTTP();
+    if (!http) throw new Error("Could not find Discord HTTP module");
 
-    // Discord bulk delete API accepts max 100 messages at once
+    const url = path.startsWith("/api/") ? path : `/api/v10${path}`;
+
+    try {
+        if (http.request) {
+            return await http.request({ method, url, body, headers: { "Content-Type": "application/json" } });
+        }
+        if (http[method.toLowerCase()]) {
+            const res = await http[method.toLowerCase()](url, body, undefined, { "Content-Type": "application/json" });
+            if (res?.body) return typeof res.body === "string" ? JSON.parse(res.body) : res.body;
+            return res;
+        }
+        throw new Error(`No method ${method} on HTTP module`);
+    } catch (e: any) {
+        throw new Error(`Discord API ${method} ${path}: ${e.message || e}`);
+    }
+}
+
+async function fetchMessages(channelId: string, limit: number): Promise<any[]> {
+    return await discordRequest("GET", `/channels/${channelId}/messages?limit=${Math.min(limit, 100)}`) || [];
+}
+
+async function bulkDelete(channelId: string, messageIds: string[]): Promise<void> {
+    // Discord bulk delete max 100 per request, rate limit between batches
     for (let i = 0; i < messageIds.length; i += 100) {
         const batch = messageIds.slice(i, i + 100);
-        await purgeLimiter.add(async () => {
-            await discordApi("POST", `/channels/${channelId}/messages/bulk-delete`, {
-                messages: batch,
-            });
-        });
+        await discordRequest("POST", `/channels/${channelId}/messages/bulk-delete`, { messages: batch });
+        if (i + 100 < messageIds.length) {
+            await new Promise(r => setTimeout(r, storage.purgeDelay));
+        }
     }
 }
 
 export function initPurge(): () => void {
     unregCommand = registerCommand({
         name: "nether",
-        displayName: "nether",
-        description: "Nether plugin commands",
-        displayDescription: "Nether plugin commands",
+        displayName: "Nether",
+        description: "Nether plugin — purge, auto, tweaks",
+        displayDescription: "Nether plugin — purge, auto, tweaks",
         applicationId: "-1",
         type: 1 as any,
         inputType: 1 as any,
         options: [
             {
                 name: "purge",
-                displayName: "purge",
-                description: "Delete your last N messages",
-                displayDescription: "Delete your last N messages",
-                type: 1 as any, // SUB_COMMAND
-                options: [
-                    {
-                        name: "count",
-                        displayName: "count",
-                        description: "Number of messages to delete (1-100)",
-                        displayDescription: "Number of messages to delete (1-100)",
-                        required: true,
-                        type: 4 as any, // INTEGER
-                    },
-                ],
+                displayName: "Purge",
+                description: "Delete your last messages",
+                displayDescription: "Delete your last messages",
+                type: 4 as any, // INTEGER — count of messages
+                required: true,
             },
             {
-                name: "purge-user",
-                displayName: "purge-user",
-                description: "Delete messages targeting a user",
-                displayDescription: "Delete messages targeting a user",
-                type: 1 as any, // SUB_COMMAND
-                options: [
-                    {
-                        name: "user",
-                        displayName: "user",
-                        description: "Target user",
-                        displayDescription: "Target user",
-                        required: true,
-                        type: 6 as any, // USER
-                    },
-                    {
-                        name: "count",
-                        displayName: "count",
-                        description: "Max messages to scan (1-100)",
-                        displayDescription: "Max messages to scan (1-100)",
-                        required: false,
-                        type: 4 as any, // INTEGER
-                    },
-                ],
+                name: "user",
+                displayName: "User",
+                description: "Only delete messages that mention this user (optional)",
+                displayDescription: "Only delete messages that mention this user",
+                type: 6 as any, // USER
+                required: false,
             },
         ],
         execute: async (args: any[], ctx: any) => {
             const channelId = ctx.channel?.id;
             if (!channelId) return { content: "❌ No channel context." };
 
-            // Try to get our own user ID from the token/API
-            let ownId = "";
-            try {
-                const me = await discordApi("GET", "/users/@me");
-                ownId = me?.id || "";
-            } catch (e) {
-                logger.error("[Nether] Failed to get own user:", e);
+            // Parse args — args is an array of { name, value } objects
+            let count = 5;
+            let targetUserId: string | null = null;
+
+            for (const arg of args || []) {
+                if (arg?.name === "purge" && arg?.value) {
+                    count = Math.min(Math.max(parseInt(arg.value) || 5, 1), 100);
+                }
+                if (arg?.name === "user" && arg?.value) {
+                    targetUserId = arg.value;
+                }
             }
 
-            if (!ownId) return { content: "❌ Could not determine your user ID." };
+            const doPurge = async () => {
+                try {
+                    showToast(`🔄 Fetching last ${count} messages...`);
 
-            const sub = args[0];
-            if (sub?.name === "purge") {
-                const count = Math.min(Math.max(sub.options?.[0]?.value || 5, 1), 100);
+                    // Get our own user ID
+                    const me = await discordRequest("GET", "/users/@me");
+                    const ownId = me?.id || "";
+                    if (!ownId) {
+                        showToast("❌ Could not determine your user ID");
+                        return;
+                    }
 
-                const doPurge = () => {
-                    showToast(`🔄 Purging ${count} messages...`);
-                    fetchChannelMessages(channelId, count).then((msgs) => {
-                        const ownMsgs = msgs.filter((m: any) => m.author.id === ownId);
+                    const msgs = await fetchMessages(channelId, count);
+                    const ownMsgs = msgs.filter((m: any) => m.author?.id === ownId);
+
+                    if (targetUserId) {
+                        // Filter to messages that mention the target user
+                        const filtered = ownMsgs.filter((m: any) =>
+                            m.mentions?.some((u: any) => u.id === targetUserId) ||
+                            m.content?.includes(`<@${targetUserId}>`)
+                        );
+                        if (filtered.length === 0) {
+                            showToast("✅ No matching messages found.");
+                            return;
+                        }
+                        const ids = filtered.map((m: any) => m.id);
+                        await bulkDelete(channelId, ids);
+                        showToast(`✅ Deleted ${ids.length} messages targeting user`);
+                    } else {
                         const ids = ownMsgs.map((m: any) => m.id);
-
                         if (ids.length === 0) {
                             showToast("✅ No messages to delete.");
                             return;
                         }
-
-                        purgeMessages(channelId, ids).then(() => {
-                            showToast(`✅ Deleted ${ids.length} messages.`);
-                        }).catch((e) => {
-                            showToast(`❌ Purge failed: ${e.message}`);
-                            logger.error("[Nether] Purge error:", e);
-                        });
-                    }).catch((e) => {
-                        showToast(`❌ Failed to fetch messages: ${e.message}`);
-                    });
-                };
-
-                if (getStorage().purgeConfirm) {
-                    showConfirmationAlert({
-                        title: "Purge Messages",
-                        content: `Delete your last ${count} messages?`,
-                        confirmText: "Purge",
-                        confirmColor: "red" as any,
-                        onConfirm: doPurge,
-                        cancelText: "Cancel",
-                    });
-                } else {
-                    doPurge();
-                }
-
-                return { content: `🗑️ Purging ${count} messages...` };
-            }
-
-            if (sub?.name === "purge-user") {
-                const userId = sub.options?.[0]?.value;
-                const count = Math.min(Math.max(sub.options?.[1]?.value || 25, 1), 100);
-
-                showToast(`🔄 Searching last ${count} messages...`);
-                try {
-                    const msgs = await fetchChannelMessages(channelId, count);
-                    const ids = msgs
-                        .filter((m: any) => {
-                            if (m.author.id !== ownId) return false;
-                            // Check if message mentions the target user
-                            if (m.mentions?.some((u: any) => u.id === userId)) return true;
-                            if (m.content?.includes(`<@${userId}>`)) return true;
-                            return false;
-                        })
-                        .map((m: any) => m.id);
-
-                    if (ids.length === 0) {
-                        return { content: "✅ No matching messages found." };
+                        await bulkDelete(channelId, ids);
+                        showToast(`✅ Deleted ${ids.length} messages`);
                     }
-
-                    await purgeMessages(channelId, ids);
-                    return { content: `🗑️ Deleted ${ids.length} messages targeting that user.` };
                 } catch (e: any) {
-                    return { content: `❌ Failed: ${e.message}` };
+                    showToast(`❌ Purge failed: ${e.message}`);
+                    logger.error("[Nether] Purge error:", e);
                 }
+            };
+
+            if (storage.purgeConfirm) {
+                showConfirmationAlert({
+                    title: "Purge Messages",
+                    content: targetUserId
+                        ? `Delete your last ${count} messages that mention that user?`
+                        : `Delete your last ${count} messages?`,
+                    confirmText: "Purge",
+                    confirmColor: "red" as any,
+                    onConfirm: doPurge,
+                    cancelText: "Cancel",
+                });
+            } else {
+                await doPurge();
             }
 
-            return { content: "Unknown command." };
+            return { content: `🗑️ Purging ${count} messages...` };
         },
     });
-
-    purgeLimiter = new RateLimiter(getStorage().purgeDelay);
 
     logger.log("[Nether] Purge initialized.");
     return () => {

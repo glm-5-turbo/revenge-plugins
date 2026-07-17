@@ -1,17 +1,17 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { discordApi } from "../utils";
-import { getStorage, AutoReactRule } from "../storage";
+import { storage, AutoReactRule } from "../storage";
 import { logger } from "@vendetta";
 
 export function initAutoReact(): () => void {
     const unpatch = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
         const action = args[0];
-        if (!getStorage().autoReactEnabled) return;
+        if (!storage.autoReactEnabled) return;
         if (action?.type !== "MESSAGE_CREATE" || !action.message) return;
 
         const m = action.message;
-        const rules = getStorage().autoReactRules;
+        const rules = storage.autoReactRules;
 
         for (const rule of rules) {
             const matchesChannel = !rule.channelId || m.channel_id === rule.channelId;

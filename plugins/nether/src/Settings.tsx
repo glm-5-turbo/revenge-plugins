@@ -1,38 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
-import { createMMKVBackend } from "@vendetta/storage";
+import { useProxy } from "@vendetta/storage";
+import { storage } from "./storage";
 
 const { FormSection, FormRow, FormSwitch, FormInput, FormDivider } = Forms;
 const { ScrollView, TouchableOpacity, Text, View } = ReactNative;
 
 type Tab = "antillog" | "purge" | "automation" | "tweaks";
-
-const defaults = {
-    antiTyping: false, antiRead: false, antiPurgeLog: false, messageLogger: false,
-    purgeDelay: 500, purgeConfirm: true,
-    afkEnabled: false, afkMessage: "I'm currently AFK.", afkDelay: 3000,
-    schedulerEnabled: false, autoReactEnabled: false, notifBypassEnabled: false,
-    ghostPings: true, spamGuardEnabled: false, spamGuardThreshold: 10,
-    spamGuardCooldown: 60000, filtersEnabled: false,
-};
-
-let settings: any = { ...defaults };
-
-export function loadSettings() {
-    try {
-        const backend = createMMKVBackend("nether-settings");
-        const raw = backend.get() as any || {};
-        settings = { ...defaults, ...raw };
-    } catch { /* use defaults */ }
-}
-
-function save() {
-    try {
-        const backend = createMMKVBackend("nether-settings");
-        backend.set(settings);
-    } catch { /* empty */ }
-}
 
 function S({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (v: boolean) => void }) {
     return (
@@ -43,95 +18,26 @@ function S({ label, value, onValueChange }: { label: string; value: boolean; onV
     );
 }
 
-function AntiLogTab() {
-    return (
-        <View>
-            <FormSection title="Anti-Logging">
-                <S label="Anti-Typing" value={!!settings.antiTyping} onValueChange={(v) => { settings.antiTyping = v; save(); }} />
-                <FormDivider />
-                <S label="Anti-Read Receipts" value={!!settings.antiRead} onValueChange={(v) => { settings.antiRead = v; save(); }} />
-                <FormDivider />
-                <S label="Anti-Purge Log" value={!!settings.antiPurgeLog} onValueChange={(v) => { settings.antiPurgeLog = v; save(); }} />
-                <FormDivider />
-                <S label="Message Logger" value={!!settings.messageLogger} onValueChange={(v) => { settings.messageLogger = v; save(); }} />
-            </FormSection>
-        </View>
-    );
-}
-
-function PurgeTab() {
-    return (
-        <View>
-            <FormSection title="Purge Settings">
-                <FormInput
-                    title="Rate Limit Delay (ms)"
-                    value={String(settings.purgeDelay)}
-                    onChange={(v: string) => { settings.purgeDelay = parseInt(v) || 500; save(); }}
-                />
-                <FormDivider />
-                <S label="Confirm Before Purge" value={!!settings.purgeConfirm} onValueChange={(v) => { settings.purgeConfirm = v; save(); }} />
-            </FormSection>
-            <FormSection title="Commands">
-                <FormRow label="/nether purge [count]" />
-                <FormDivider />
-                <FormRow label="/nether purge-user @user [count]" />
-            </FormSection>
-        </View>
-    );
-}
-
-function AutomationTab() {
-    return (
-        <View>
-            <FormSection title="AFK Mode">
-                <S label="Enable AFK" value={!!settings.afkEnabled} onValueChange={(v) => { settings.afkEnabled = v; save(); }} />
-                <FormDivider />
-                <FormInput
-                    title="AFK Message"
-                    value={String(settings.afkMessage)}
-                    onChange={(v: string) => { settings.afkMessage = v; save(); }}
-                />
-                <FormDivider />
-                <FormInput
-                    title="Reply Delay (ms)"
-                    value={String(settings.afkDelay)}
-                    onChange={(v: string) => { settings.afkDelay = parseInt(v) || 3000; save(); }}
-                />
-            </FormSection>
-            <FormSection title="Other">
-                <S label="Message Scheduler" value={!!settings.schedulerEnabled} onValueChange={(v) => { settings.schedulerEnabled = v; save(); }} />
-                <FormDivider />
-                <S label="Auto-React" value={!!settings.autoReactEnabled} onValueChange={(v) => { settings.autoReactEnabled = v; save(); }} />
-                <FormDivider />
-                <S label="Notification Bypass (Experimental)" value={!!settings.notifBypassEnabled} onValueChange={(v) => { settings.notifBypassEnabled = v; save(); }} />
-            </FormSection>
-        </View>
-    );
-}
-
-function TweaksTab() {
-    return (
-        <View>
-            <FormSection title="Chat Tweaks">
-                <S label="Ghost Pings" value={!!settings.ghostPings} onValueChange={(v) => { settings.ghostPings = v; save(); }} />
-                <FormDivider />
-                <S label="Spam Guard" value={!!settings.spamGuardEnabled} onValueChange={(v) => { settings.spamGuardEnabled = v; save(); }} />
-                <FormDivider />
-                <S label="Custom Filters" value={!!settings.filtersEnabled} onValueChange={(v) => { settings.filtersEnabled = v; save(); }} />
-            </FormSection>
-        </View>
-    );
-}
-
-const tabs = [
-    { key: "antillog" as Tab, label: "Anti-Log" },
-    { key: "purge" as Tab, label: "Purge" },
-    { key: "automation" as Tab, label: "Auto" },
-    { key: "tweaks" as Tab, label: "Tweaks" },
+const tabs: { key: Tab; label: string }[] = [
+    { key: "antillog", label: "Anti-Log" },
+    { key: "purge", label: "Purge" },
+    { key: "automation", label: "Auto" },
+    { key: "tweaks", label: "Tweaks" },
 ];
 
 export default function SettingsPanel() {
     const [tab, setTab] = useState<Tab>("antillog");
+
+    // useProxy makes the component reactive to storage changes
+    useProxy(storage);
+
+    // Wire AFK toggle
+    useEffect(() => {
+        try {
+            const toggle = (globalThis as any).__nether_setAFK;
+            if (toggle) toggle(storage.afkEnabled);
+        } catch {}
+    }, [storage.afkEnabled]);
 
     return (
         <ScrollView>
@@ -158,10 +64,80 @@ export default function SettingsPanel() {
                     </TouchableOpacity>
                 ))}
             </View>
-            {tab === "antillog" && <AntiLogTab />}
-            {tab === "purge" && <PurgeTab />}
-            {tab === "automation" && <AutomationTab />}
-            {tab === "tweaks" && <TweaksTab />}
+
+            {tab === "antillog" && (
+                <View>
+                    <FormSection title="Anti-Logging">
+                        <S label="Anti-Typing" value={!!storage.antiTyping} onValueChange={(v) => { storage.antiTyping = v; }} />
+                        <FormDivider />
+                        <S label="Anti-Read Receipts" value={!!storage.antiRead} onValueChange={(v) => { storage.antiRead = v; }} />
+                        <FormDivider />
+                        <S label="Anti-Purge Log" value={!!storage.antiPurgeLog} onValueChange={(v) => { storage.antiPurgeLog = v; }} />
+                        <FormDivider />
+                        <S label="Message Logger" value={!!storage.messageLogger} onValueChange={(v) => { storage.messageLogger = v; }} />
+                    </FormSection>
+                </View>
+            )}
+
+            {tab === "purge" && (
+                <View>
+                    <FormSection title="Purge Settings">
+                        <FormInput
+                            title="Rate Limit Delay (ms)"
+                            value={String(storage.purgeDelay)}
+                            onChange={(v: string) => { storage.purgeDelay = parseInt(v) || 500; }}
+                        />
+                        <FormDivider />
+                        <S label="Confirm Before Purge" value={!!storage.purgeConfirm} onValueChange={(v) => { storage.purgeConfirm = v; }} />
+                    </FormSection>
+                    <FormSection title="Commands">
+                        <FormRow label="/nether purge [count]" />
+                        <FormDivider />
+                        <FormRow label="/nether purge-user @user [count]" />
+                    </FormSection>
+                </View>
+            )}
+
+            {tab === "automation" && (
+                <View>
+                    <FormSection title="AFK Mode">
+                        <S label="Enable AFK" value={!!storage.afkEnabled} onValueChange={(v) => { storage.afkEnabled = v; }} />
+                        <FormDivider />
+                        <FormInput
+                            title="AFK Message"
+                            value={String(storage.afkMessage)}
+                            onChange={(v: string) => { storage.afkMessage = v; }}
+                        />
+                        <FormDivider />
+                        <FormInput
+                            title="Reply Delay (ms)"
+                            value={String(storage.afkDelay)}
+                            onChange={(v: string) => { storage.afkDelay = parseInt(v) || 3000; }}
+                        />
+                    </FormSection>
+                    <FormSection title="Other">
+                        <S label="Message Scheduler" value={!!storage.schedulerEnabled} onValueChange={(v) => { storage.schedulerEnabled = v; }} />
+                        <FormDivider />
+                        <S label="Auto-React" value={!!storage.autoReactEnabled} onValueChange={(v) => { storage.autoReactEnabled = v; }} />
+                        <FormDivider />
+                        <S label="Notification Bypass (Experimental)" value={!!storage.notifBypassEnabled} onValueChange={(v) => { storage.notifBypassEnabled = v; }} />
+                    </FormSection>
+                </View>
+            )}
+
+            {tab === "tweaks" && (
+                <View>
+                    <FormSection title="Chat Tweaks">
+                        <S label="Ghost Pings" value={!!storage.ghostPings} onValueChange={(v) => { storage.ghostPings = v; }} />
+                        <FormDivider />
+                        <S label="Spam Guard" value={!!storage.spamGuardEnabled} onValueChange={(v) => { storage.spamGuardEnabled = v; }} />
+                        <FormDivider />
+                        <S label="Custom Filters" value={!!storage.filtersEnabled} onValueChange={(v) => { storage.filtersEnabled = v; }} />
+                        <FormDivider />
+                        <S label="Debug Mode" value={!!storage.debugMode} onValueChange={(v) => { storage.debugMode = v; }} />
+                    </FormSection>
+                </View>
+            )}
         </ScrollView>
     );
 }

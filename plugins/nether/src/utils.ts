@@ -49,33 +49,34 @@ export function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Get the current user's Discord token from the running session
+// Extract Discord token — tries known module locations
 export function getToken(): string {
     try {
-        // The token is typically stored in the RestClient or similar module
-        const RestClient = findByProps("getToken", "del", "get");
-        return RestClient?.getToken?.() || "";
-    } catch (e) {
-        logger.error("Failed to get token:", e);
-        return "";
-    }
+        const rest = findByProps("getToken");
+        if (rest?.getToken?.()) return rest.getToken();
+    } catch {}
+    try {
+        const http = findByProps("getSuperProperties", "getToken");
+        if (http?.getToken?.()) return http.getToken();
+    } catch {}
+    try {
+        const api = findByProps("API", "api");
+        if (api?.API?._token) return api.API._token;
+    } catch {}
+    return "";
 }
 
 // Make an authenticated Discord REST API request
-export async function discordApi(
-    method: string,
-    path: string,
-    body?: unknown
-): Promise<any> {
+export async function discordApi(method: string, path: string, body?: unknown): Promise<any> {
     const token = getToken();
     if (!token) throw new Error("No Discord token available");
 
-    const res = await safeFetch(`https://discord.com/api/v10${path}`, {
+    const url = path.startsWith("http") ? path : `https://discord.com/api/v10${path}`;
+    const res = await safeFetch(url, {
         method,
         headers: {
             Authorization: token,
             "Content-Type": "application/json",
-            "User-Agent": "DiscordBot/1.0",
         },
         body: body ? JSON.stringify(body) : undefined,
     });
@@ -88,7 +89,6 @@ export async function discordApi(
     return res.json().catch(() => null);
 }
 
-// Generate a simple unique ID
 export function uid(): string {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }

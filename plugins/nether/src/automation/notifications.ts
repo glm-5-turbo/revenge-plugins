@@ -1,6 +1,6 @@
 import { patcher } from "@vendetta";
 import { showToast } from "@vendetta/ui/toasts";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 // Experimental: Hook into Discord's notification handling
@@ -16,7 +16,7 @@ export function initNotifications(): () => void {
 
         unpatch = patcher.after("dispatch", require("@vendetta/metro/common").FluxDispatcher, (args: any[]) => {
             const action = args[0];
-            if (!getStorage().notifBypassEnabled) return;
+            if (!storage.notifBypassEnabled) return;
 
             // Look for notification-related events
             if (

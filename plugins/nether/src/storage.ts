@@ -1,28 +1,18 @@
-import { createMMKVBackend, createStorage, wrapSync, createProxy, awaitSyncWrapper } from "@vendetta/storage";
+import { storage } from "@vendetta/plugin";
+import { useProxy } from "@vendetta/storage";
 
-export interface NetherSettings {
-    antiTyping: boolean;
-    antiRead: boolean;
-    antiPurgeLog: boolean;
-    messageLogger: boolean;
-    purgeDelay: number;
-    purgeConfirm: boolean;
-    afkEnabled: boolean;
-    afkMessage: string;
-    afkDelay: number;
-    schedulerEnabled: boolean;
-    autoReactEnabled: boolean;
-    autoReactRules: any[];
-    notifBypassEnabled: boolean;
-    ghostPings: boolean;
-    spamGuardEnabled: boolean;
-    spamGuardThreshold: number;
-    spamGuardCooldown: number;
-    filtersEnabled: boolean;
-    filterRules: any[];
+export interface AutoReactRule {
+    channelId?: string;
+    userId?: string;
+    emoji: string;
 }
 
-const defaults: NetherSettings = {
+export interface FilterRule {
+    type: "user" | "regex" | "bot";
+    value: string;
+}
+
+const defaults = {
     antiTyping: false,
     antiRead: false,
     antiPurgeLog: false,
@@ -34,38 +24,23 @@ const defaults: NetherSettings = {
     afkDelay: 3000,
     schedulerEnabled: false,
     autoReactEnabled: false,
-    autoReactRules: [],
+    autoReactRules: [] as AutoReactRule[],
     notifBypassEnabled: false,
     ghostPings: true,
     spamGuardEnabled: false,
     spamGuardThreshold: 10,
     spamGuardCooldown: 60000,
     filtersEnabled: false,
-    filterRules: [],
+    filterRules: [] as FilterRule[],
+    debugMode: false,
 };
 
-let storage: NetherSettings;
-
-export async function initStorage(): Promise<void> {
-    const backend = createMMKVBackend("nether-settings");
-    let raw: NetherSettings;
-    try {
-        const result = await createStorage<NetherSettings>(backend);
-        wrapSync(result);
-        raw = result as unknown as NetherSettings;
-    } catch {
-        raw = { ...defaults };
+export function initStorage() {
+    for (const [key, val] of Object.entries(defaults)) {
+        if ((storage as any)[key] === undefined) {
+            (storage as any)[key] = val;
+        }
     }
-
-    const merged = { ...defaults, ...raw };
-    backend.set(merged);
-
-    const { proxy } = createProxy(merged);
-    storage = proxy;
 }
 
-export function getStorage(): NetherSettings {
-    return storage;
-}
-
-export { storage as default };
+export { storage };

@@ -2,7 +2,7 @@ import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { findByProps } from "@vendetta/metro";
-import { getStorage } from "../storage";
+import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 export function initGhostPings(): () => void {
@@ -15,7 +15,7 @@ export function initGhostPings(): () => void {
 
     const unpatchDelete = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
-        if (!getStorage().ghostPings) return;
+        if (!storage.ghostPings) return;
 
         if (action?.type === "MESSAGE_DELETE" && action.message?.author) {
             const m = action.message;
