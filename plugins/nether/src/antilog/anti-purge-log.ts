@@ -2,29 +2,33 @@ import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { findByStoreName } from "@vendetta/metro";
 import { storage } from "../storage";
+import { discordApi } from "../utils";
 import { logger } from "@vendetta";
 
 /**
  * Anti-Purge Log
  *
- * Intercepts MESSAGE_DELETE for YOUR messages and converts to MESSAGE_UPDATE
- * so the message stays in the UI (marked deleted via RowManager patch) but
- * other anti-log plugins never see a delete event.
+ * When you delete a message, this edits the message to dummy/block text
+ * FIRST, THEN dispatches the real MESSAGE_DELETE so other clients'
+ * message loggers only capture the dummy content.
  *
- * Based on the proven pattern from vendetta message-logger plugins:
- *   patcher.before → convert MESSAGE_DELETE → MESSAGE_UPDATE
- *
- * The /purge command uses REST API directly (bypasses FluxDispatcher),
- * so this only covers single-message deletes via long-press → Delete.
+ * Flow:
+ *   patcher.before("dispatch") intercepts MESSAGE_DELETE
+ *   → Suppresses the original event
+ *   → Edits the message to dummy text via REST API
+ *   → Dispatches a new MESSAGE_DELETE with the real ID
+ *   → Other clients' loggers see the dummy content in their cache
  */
+
+let ownUserId = "";
+
 export function initAntiPurgeLog(): () => void {
-    let ownUserId = "";
     try {
         const UserStore = findByStoreName("UserStore") as any;
         ownUserId = UserStore?.getCurrentUser()?.id || "";
     } catch {}
 
-    const unpatch = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
+    const unpatch = patcher.before("dispatch", FluxDispatcher, async (args: any[]) => {
         const action = args[0];
         if (!storage.antiPurgeLog) return;
 
@@ -32,31 +36,38 @@ export function initAntiPurgeLog(): () => void {
             const channelId = action.channel_id;
             const msgId = action.id;
 
-            // Only intercept deletes of OUR messages
             const MessageStore = findByStoreName("MessageStore") as any;
             const msgs = MessageStore?.getMessages(channelId);
             const msg = msgs?.get(msgId);
-            if (msg && msg.author?.id === ownUserId) {
-                // Convert MESSAGE_DELETE → MESSAGE_UPDATE
-                // This keeps the message visible (with deleted styling)
-                // while shielding it from other plugins' patcher.after hooks
-                action.type = "MESSAGE_UPDATE";
-                action.message = {
+            if (!msg || msg.author?.id !== ownUserId) return;
+
+            // Suppress the original delete event
+            args[0] = { type: "__NETHER_BLOCKED__" };
+
+            const blockText = storage.antiPurgeLogMessage || "‎";
+
+            try {
+                // Edit to dummy text first — this propagates to other clients
+                // and their message loggers cache this instead of the original
+                await discordApi("PATCH", `/channels/${channelId}/messages/${msgId}`, {
+                    content: blockText,
+                });
+
+                // Now dispatch the real delete — content is already overwritten
+                FluxDispatcher.dispatch({
+                    type: "MESSAGE_DELETE",
                     id: msgId,
                     channel_id: channelId,
-                    content: msg.content || "",
-                    author: msg.author,
-                    timestamp: msg.timestamp,
-                    attachments: msg.attachments,
-                    embeds: msg.embeds,
-                    __vml_deleted: true,
-                    flags: msg.flags,
-                };
+                });
+            } catch (e: any) {
+                // Edit failed (too old, no permission) — just let delete go through
+                logger.error("[Nether] Anti-purge edit failed:", e.message);
+                FluxDispatcher.dispatch({
+                    type: "MESSAGE_DELETE",
+                    id: msgId,
+                    channel_id: channelId,
+                });
             }
-        }
-
-        if (action?.type === "MESSAGE_DELETE_BULK") {
-            args[0] = { type: "__NETHER_BLOCKED__" };
         }
     });
 

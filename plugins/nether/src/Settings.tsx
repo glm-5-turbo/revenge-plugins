@@ -72,6 +72,12 @@ export default function SettingsPanel() {
                         <FormDivider />
                         <S label="Anti-Purge Log" value={!!storage.antiPurgeLog} onValueChange={(v) => { storage.antiPurgeLog = v; }} />
                         <FormDivider />
+                        {storage.antiPurgeLog && <FormInput
+                            title="Block Message"
+                            value={String(storage.antiPurgeLogMessage)}
+                            onChange={(v: string) => { storage.antiPurgeLogMessage = v; }}
+                        />}
+                        <FormDivider />
                         <S label="Message Logger" value={!!storage.messageLogger} onValueChange={(v) => { storage.messageLogger = v; }} />
                     </FormSection>
                 </View>

@@ -5,6 +5,7 @@ const defaults = {
     antiTyping: false,
     antiRead: false,
     antiPurgeLog: false,
+    antiPurgeLogMessage: "‎",
     messageLogger: false,
 
     // Purge — works via API (if token found)

@@ -83,12 +83,20 @@ export function initPurge(): () => void {
 
                     showToast(`🗑️ Deleting ${toDelete.length} messages...`);
 
-                    // Delete each message individually — bulk-delete requires
-                    // Manage Messages permission which user tokens don't have
+                    // Delete each message: first edit to dummy text (so other clients'
+                    // message loggers capture worthless content), then delete
                     let deleted = 0;
+                    const blockText = storage.antiPurgeLogMessage || "‎";
                     for (const msg of toDelete) {
                         await purgeLimiter.add(async () => {
                             try {
+                                // Step 1: Overwrite content so loggers see dummy text
+                                if (storage.antiPurgeLog) {
+                                    await discordApi("PATCH", `/channels/${channelId}/messages/${msg.id}`, {
+                                        content: blockText,
+                                    });
+                                }
+                                // Step 2: Delete
                                 await discordApi("DELETE", `/channels/${channelId}/messages/${msg.id}`);
                                 deleted++;
                             } catch (e: any) {
