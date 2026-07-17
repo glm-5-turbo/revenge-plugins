@@ -2,12 +2,15 @@ import { findByProps, findByStoreName } from "@vendetta/metro";
 import { logger } from "@vendetta";
 
 export class RateLimiter {
-    private queue: (() => Promise<void>)[] = [];
-    private running = false;
-    private lastRun = 0;
-    public interval: number;
+    queue: (() => Promise<void>)[] = [];
+    running = false;
+    lastRun = 0;
+    interval: number;
 
     constructor(interval: number = 500) {
+        this.queue = [];
+        this.running = false;
+        this.lastRun = 0;
         this.interval = interval;
     }
 
