@@ -27,13 +27,13 @@ export function initAFK(): () => void {
         if (!ownUserId) ownUserId = getOwnUserId();
         if (!ownUserId) return;
 
-        if (m.author.id === userId) {
+        if (m.author.id === ownUserId) {
             afkActive = false;
             showToast("💤 AFK mode disabled.");
             return;
         }
 
-        if (isMentioned(m.content, userId)) {
+        if (isMentioned(m.content, ownUserId)) {
             if (afkTimeout) clearTimeout(afkTimeout);
             afkTimeout = setTimeout(async () => {
                 try {

@@ -1,3 +1,4 @@
+import { findByProps, findByStoreName } from "@vendetta/metro";
 import { logger } from "@vendetta";
 
 export class RateLimiter {
@@ -42,49 +43,25 @@ export function sleep(ms: number): Promise<void> {
 /**
  * Get the Discord auth token via Discord's internal module.
  *
- * This uses findByProps("getToken") which is confirmed working
+ * Uses findByProps("getToken") which is confirmed working
  * on Revenge (nexpid's customrpc plugin uses it successfully).
- * Discord mobile obfuscates some module property names but
- * "getToken" is a function reference that survives minification
- * because it's called internally by Discord's own code.
  */
 export function getToken(): string {
     try {
-        const { findByProps } = require("@vendetta/metro");
-        const mod = findByProps("getToken");
+        const mod = findByProps("getToken") as any;
         const token = mod?.getToken?.();
         if (typeof token === "string" && token.length > 50) return token;
     } catch (e) {
-        logger.error("[Nether] getToken via findByProps failed:", e);
+        logger.error("[Nether] getToken failed:", e);
     }
 
-    // Fallback: try to find it via the HTTP module
+    // Fallback: try HTTP module which sometimes carries getToken
     try {
-        const { findByProps } = require("@vendetta/metro");
-        const httpMod = findByProps("get", "post");
+        const httpMod = findByProps("get", "post") as any;
         if (httpMod && typeof httpMod.getToken === "function") {
             const token = httpMod.getToken();
             if (typeof token === "string" && token.length > 50) return token;
         }
-    } catch {}
-
-    // Fallback: hook XMLHttpRequest to capture Authorization header
-    // This catches the token from Discord's own outgoing requests
-    try {
-        const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
-        let capturedToken = "";
-        XMLHttpRequest.prototype.setRequestHeader = function(name: string, value: string) {
-            if (name.toLowerCase() === "authorization" && value.length > 50) {
-                capturedToken = value;
-            }
-            return origSetHeader.call(this, name, value);
-        };
-        // Trigger a request that will use auth — just hook and wait
-        // The token should be captured on the next Discord API call
-        setTimeout(() => {
-            XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
-        }, 5000);
-        if (capturedToken) return capturedToken;
     } catch {}
 
     return "";
@@ -93,40 +70,26 @@ export function getToken(): string {
 /**
  * Make an authenticated Discord API request.
  *
- * Uses Approach 1 (Discord's native HTTP module) when possible,
- * falling back to safeFetch + manual auth header.
+ * Tries Discord's native HTTP module first (auth handled automatically),
+ * falls back to getToken() + fetch.
  */
-let _discordHttp: any = null;
-
-function getDiscordHttp(): any {
-    if (!_discordHttp) {
-        try {
-            const { findByProps } = require("@vendetta/metro");
-            _discordHttp = findByProps("get", "post", "put", "patch", "delete");
-        } catch {}
-    }
-    return _discordHttp;
-}
-
 export async function discordApi(method: string, path: string, body?: unknown): Promise<any> {
     const url = path.startsWith("http") ? path : `https://discord.com/api/v9${path}`;
 
-    // Try using Discord's native HTTP module first (handles auth + token refresh automatically)
-    const http = getDiscordHttp();
-    if (http && typeof http[method.toLowerCase()] === "function") {
-        try {
-            const res = await http[method.toLowerCase()](url, body ? { body } : undefined);
+    // Try using Discord's native HTTP module (handles auth + token refresh automatically)
+    try {
+        const httpMod = findByProps("get", "post", "put", "patch", "delete") as any;
+        const httpFn = httpMod?.[method.toLowerCase()];
+        if (typeof httpFn === "function") {
+            const res = await httpFn(url, body ? { body } : undefined);
             return res?.body ?? res;
-        } catch (e: any) {
-            // If it fails with network error, fall through to manual approach
-            logger.error("[Nether] Discord HTTP module failed, falling back:", e);
         }
+    } catch (e: any) {
+        logger.error("[Nether] Discord HTTP module failed:", e);
     }
 
     // Fallback: manual auth via getToken() + fetch
-    const { findByProps } = require("@vendetta/metro");
-    const { getToken } = findByProps("getToken");
-    const token = getToken?.();
+    const token = getToken();
     if (!token || token.length < 50) throw new Error("Could not find Discord auth token");
 
     const res = await fetch(url, {
@@ -148,8 +111,7 @@ export async function discordApi(method: string, path: string, body?: unknown): 
 
 export function getOwnUserId(): string {
     try {
-        const { findByStoreName } = require("@vendetta/metro");
-        const UserStore = findByStoreName("UserStore");
+        const UserStore = findByStoreName("UserStore") as any;
         return UserStore?.getCurrentUser()?.id || "";
     } catch {
         return "";

@@ -1,6 +1,7 @@
 import { registerCommand } from "@vendetta/commands";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { showToast } from "@vendetta/ui/toasts";
+import { findByStoreName } from "@vendetta/metro";
 import { storage } from "../storage";
 import { discordApi, RateLimiter } from "../utils";
 import { logger } from "@vendetta";
@@ -56,8 +57,7 @@ export function initPurge(): () => void {
                     // Get user identity via UserStore instead of API call when possible
                     let myId = "";
                     try {
-                        const { findByStoreName } = require("@vendetta/metro");
-                        const UserStore = findByStoreName("UserStore");
+                        const UserStore = findByStoreName("UserStore") as any;
                         myId = UserStore?.getCurrentUser()?.id || "";
                     } catch {}
                     if (!myId) {

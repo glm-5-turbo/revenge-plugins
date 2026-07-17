@@ -1,5 +1,6 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
+import { findByStoreName } from "@vendetta/metro";
 import { discordApi } from "../utils";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
@@ -7,8 +8,7 @@ import { logger } from "@vendetta";
 let ownUserId = "";
 
 export function initAutoReact(): () => void {
-    const { findByStoreName } = require("@vendetta/metro");
-    const UserStore = findByStoreName("UserStore");
+    const UserStore = findByStoreName("UserStore") as any;
     ownUserId = UserStore?.getCurrentUser()?.id || "";
 
     const unpatch = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
