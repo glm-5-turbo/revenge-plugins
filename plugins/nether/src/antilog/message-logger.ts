@@ -3,7 +3,6 @@ import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
-import { findByProps } from "@vendetta";
 
 interface CachedMessage {
     id: string;
