@@ -6,110 +6,148 @@ import { logger } from "@vendetta";
 import SettingsComponent from "./Settings";
 
 /**
- * Add a settings button to the Discord guild sidebar.
- *
- * Finds the GuildList component and injects a custom button
- * at the top that opens the Nether plugin settings.
+ * Add a Nether settings button to the Discord guild sidebar.
+ * Tries multiple strategies to find the right component to patch.
  */
 
 let patches: (() => void)[] = [];
+let injected = false;
 
 export function initGuildButton(): () => void {
+    // Strategy 1: Patch GuildList component
     try {
-        const GuildList = findGuildList();
-        if (!GuildList) {
-            logger.log("[Nether] GuildList not found, skipping guild button");
-            return () => {};
+        const gl = findDisplayName("GuildList");
+        if (gl) {
+            patches.push(patcher.after("default", gl, (_args: any[], ret: any) => {
+                if (!ret?.props) return;
+                const btn = makeBtn();
+                ret.props.children = Array.isArray(ret.props.children)
+                    ? [btn, ...ret.props.children]
+                    : [btn, ret.props.children];
+            }));
+            logger.log("[Nether] GuildButton: patched GuildList");
+            return cleanup();
         }
+    } catch {}
 
-        const navigation = findByProps("pushLazy", "push") as any;
+    // Strategy 2: Patch GuildsBar
+    try {
+        const gb = findDisplayName("GuildsBar");
+        if (gb) {
+            patches.push(patcher.after("default", gb, (_args: any[], ret: any) => {
+                if (injected || !ret?.props) return;
+                injected = true;
+                const btn = makeBtn();
+                ret.props.children = Array.isArray(ret.props.children)
+                    ? [btn, ...ret.props.children]
+                    : [btn, ret.props.children];
+            }));
+            logger.log("[Nether] GuildButton: patched GuildsBar");
+            return cleanup();
+        }
+    } catch {}
 
-        const unpatch = patcher.after("default", GuildList, (_args: any[], ret: any) => {
-            if (!ret?.props?.children) return;
+    // Strategy 3: Patch HomeButton
+    try {
+        const hb = findDisplayName("HomeButton");
+        if (hb) {
+            patches.push(patcher.after("default", hb, (_args: any[], ret: any) => {
+                if (injected || !ret?.props) return;
+                injected = true;
+                const btn = makeBtn();
+                ret.props.children = Array.isArray(ret.props.children)
+                    ? [btn, ...ret.props.children]
+                    : [btn, ret.props.children];
+            }));
+            logger.log("[Nether] GuildButton: patched HomeButton");
+            return cleanup();
+        }
+    } catch {}
 
-            const button = React.createElement(
-                ReactNative.TouchableOpacity,
-                {
-                    style: {
-                        width: 48,
-                        height: 48,
-                        borderRadius: 24,
-                        backgroundColor: "#5865F2",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        marginVertical: 4,
-                        marginHorizontal: 8,
-                        elevation: 2,
-                        shadowColor: "#5865F2",
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.3,
-                        shadowRadius: 3,
-                    },
-                    onPress: () => openSettings(navigation),
-                    onLongPress: () => showToast("Nether Settings"),
-                },
-                React.createElement(
-                    ReactNative.Text,
-                    { style: { color: "#fff", fontSize: 18, fontWeight: "700" } },
-                    "N"
-                )
-            );
+    // Strategy 4: Patch GuildIcon
+    try {
+        const gi = findDisplayName("GuildIcon");
+        if (gi) {
+            patches.push(patcher.after("default", gi, (_args: any[], ret: any) => {
+                if (injected || !ret?.props) return;
+                injected = true;
+                const btn = makeBtn();
+                ret.props.children = Array.isArray(ret.props.children)
+                    ? [btn, ...ret.props.children]
+                    : [btn, ret.props.children];
+            }));
+            logger.log("[Nether] GuildButton: patched GuildIcon");
+            return cleanup();
+        }
+    } catch {}
 
-            // Inject at the beginning of guild list
-            const children = Array.isArray(ret.props.children)
-                ? [button, ...ret.props.children]
-                : [button, ret.props.children];
-
-            ret.props.children = children;
-        });
-
-        patches.push(unpatch);
-        logger.log("[Nether] Guild button initialized.");
-    } catch (e) {
-        logger.error("[Nether] Guild button init failed:", e);
-    }
-
-    return () => {
-        for (const p of patches) p();
-        patches = [];
-        logger.log("[Nether] Guild button unloaded.");
-    };
-}
-
-function findGuildList(): any {
-    // Try common display names for the guild list
-    for (const name of ["GuildList", "GuildSidebar", "ServerList", "GuildListPage"]) {
-        try {
-            const mod = findByDisplayName(name) as any;
-            if (mod?.default || mod?.render) return mod.default ?? mod;
-        } catch {}
-    }
-    // Fallback: try finding by props
+    // Strategy 5: Try finding by props
     try {
         const mod = findByProps("GuildList", "guilds") as any;
-        if (mod?.GuildList) return mod.GuildList;
+        if (mod?.GuildList) {
+            patches.push(patcher.after("default", mod.GuildList, (_args: any[], ret: any) => {
+                if (!ret?.props) return;
+                const btn = makeBtn();
+                ret.props.children = Array.isArray(ret.props.children)
+                    ? [btn, ...ret.props.children]
+                    : [btn, ret.props.children];
+            }));
+            logger.log("[Nether] GuildButton: patched via findByProps");
+            return cleanup();
+        }
     } catch {}
-    return null;
+
+    logger.log("[Nether] GuildButton: no component found");
+    return () => {};
 }
 
-function openSettings(nav: any): void {
+function makeBtn(): any {
+    return React.createElement(
+        ReactNative.TouchableOpacity,
+        {
+            style: {
+                width: 48, height: 48, borderRadius: 24,
+                backgroundColor: "#5865F2",
+                justifyContent: "center" as any, alignItems: "center" as any,
+                marginVertical: 4, marginHorizontal: 8,
+            },
+            onPress: openSettings,
+            onLongPress: () => showToast("Nether Settings"),
+        },
+        React.createElement(
+            ReactNative.Text,
+            { style: { color: "#fff", fontSize: 18, fontWeight: "700" as any } },
+            "N"
+        )
+    );
+}
+
+function findDisplayName(name: string): any {
     try {
+        const m = findByDisplayName(name) as any;
+        return m?.default ?? m;
+    } catch { return null; }
+}
+
+function openSettings(): void {
+    try {
+        const nav = findByProps("pushLazy") as any;
         if (nav?.pushLazy) {
             nav.pushLazy("BUNNY_CUSTOM_PAGE", {
                 title: "Nether",
                 render: () => React.createElement(SettingsComponent),
             });
-        } else if (nav?.push) {
-            nav.push({
-                name: "NETHER_SETTINGS",
-                title: "Nether",
-                render: () => React.createElement(SettingsComponent),
-            });
-        } else {
-            showToast("⚙️ Nether: Check plugin settings in Revenge → Plugins");
+            return;
         }
-    } catch (e) {
-        logger.error("[Nether] Failed to open settings:", e);
-        showToast("❌ Failed to open settings");
-    }
+    } catch {}
+    showToast("⚙️ Nether: Settings → Plugins → Nether");
+}
+
+function cleanup(): () => void {
+    return () => {
+        for (const p of patches) p();
+        patches = [];
+        injected = false;
+        logger.log("[Nether] GuildButton unloaded");
+    };
 }
