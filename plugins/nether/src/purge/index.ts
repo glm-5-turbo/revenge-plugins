@@ -10,7 +10,7 @@ let unregCommand: (() => void) | null = null;
 let purgeLimiter: RateLimiter;
 
 export function initPurge(): () => void {
-    purgeLimiter = new RateLimiter(storage.purgeDelay || 800);
+    purgeLimiter = new RateLimiter(storage.purgeDelay || 100);
 
     unregCommand = registerCommand({
         name: "purge",

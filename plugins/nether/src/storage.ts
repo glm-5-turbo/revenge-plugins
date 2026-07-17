@@ -8,8 +8,13 @@ const defaults = {
     messageLogger: false,
 
     // Purge — works via API (if token found)
-    purgeDelay: 800,
+    purgeDelay: 100,
     purgeConfirm: true,
+
+    // Auto-Delete (Telegram-style) — works via API
+    autoDeleteEnabled: false,
+    autoDeleteDelay: 86400000, // 24 hours in ms
+    autoDeleteChannels: [], // empty = all channels
 
     // AFK — works via API (if token found)
     afkEnabled: false,

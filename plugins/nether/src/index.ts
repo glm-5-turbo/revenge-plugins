@@ -7,6 +7,7 @@ import { initMessageLogger } from "./antilog/message-logger";
 import { initPurge } from "./purge";
 import { initAFK } from "./automation/afk";
 import { initAutoReact } from "./automation/auto-react";
+import { initAutoDelete } from "./automation/auto-delete";
 import { initGhostPings } from "./tweaks/ghost-pings";
 import { initSpamGuard } from "./tweaks/spam-guard";
 import { initFilters } from "./tweaks/filters";
@@ -29,6 +30,7 @@ export default {
         // Automation
         unloads.push(initAFK());
         unloads.push(initAutoReact());
+        unloads.push(initAutoDelete());
 
         // Chat Tweaks
         unloads.push(initGhostPings());

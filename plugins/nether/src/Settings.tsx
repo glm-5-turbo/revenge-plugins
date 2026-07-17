@@ -83,10 +83,21 @@ export default function SettingsPanel() {
                         <FormInput
                             title="Rate Limit Delay (ms)"
                             value={String(storage.purgeDelay)}
-                            onChange={(v: string) => { storage.purgeDelay = parseInt(v) || 800; }}
+                            onChange={(v: string) => { storage.purgeDelay = parseInt(v) || 100; }}
                         />
                         <FormDivider />
                         <S label="Confirm Before Purge" value={!!storage.purgeConfirm} onValueChange={(v) => { storage.purgeConfirm = v; }} />
+                    </FormSection>
+                    <FormSection title="Auto-Delete (Telegram-style)">
+                        <S label="Enable Auto-Delete" value={!!storage.autoDeleteEnabled} onValueChange={(v) => { storage.autoDeleteEnabled = v; }} />
+                        <FormDivider />
+                        <FormInput
+                            title="Delete after (hours)"
+                            value={String(Math.round((storage.autoDeleteDelay || 86400000) / 3600000))}
+                            onChange={(v: string) => { storage.autoDeleteDelay = (parseInt(v) || 24) * 3600000; }}
+                        />
+                        <FormRow label="Messages auto-delete after the set time" />
+                        <FormRow label="Requires Revenge running in background" />
                     </FormSection>
                     <FormSection title="Usage">
                         <FormRow label="/purge 5 — deletes your last 5 messages" />
