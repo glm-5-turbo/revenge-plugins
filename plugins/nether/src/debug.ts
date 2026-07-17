@@ -1,4 +1,4 @@
-import { patcher } from "@vendetta";
+import { patcher, findAll } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { storage } from "./storage";
 import { logger } from "@vendetta";
@@ -6,6 +6,18 @@ import { logger } from "@vendetta";
 // Intercept all FluxDispatcher actions for debugging
 // Enabled by the "Debug Mode" toggle in Settings
 export function initDebug(): () => void {
+    // On first load, dump all metro components containing "Guild" in their name
+    // This helps identify the correct component name for the guild sidebar button
+    try {
+        const all = findAll(() => true) as any[];
+        const guildComps = all
+            .filter(m => m && (m.displayName?.includes("Guild") || m.name?.includes("Guild")))
+            .map(m => ({ displayName: m.displayName, name: m.name }));
+        if (guildComps.length > 0) {
+            logger.log("[Nether] Found guild components: " + JSON.stringify(guildComps));
+        }
+    } catch {}
+
     const unpatch = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         if (!storage.debugMode) return;
 
