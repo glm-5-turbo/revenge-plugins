@@ -17,13 +17,14 @@ interface CachedMessage {
 const MAX_PER_CHANNEL = 500;
 const cache: Record<string, CachedMessage[]> = {};
 
+// Track which messages we've marked as edited to avoid double-marking
+const editedMarked = new Set<string>();
+
 function addMessage(msg: CachedMessage): void {
     if (!cache[msg.channelId]) cache[msg.channelId] = [];
     const channelCache = cache[msg.channelId];
-    // Deduplicate
     if (channelCache.find((m) => m.id === msg.id)) return;
     channelCache.push(msg);
-    // Trim
     if (channelCache.length > MAX_PER_CHANNEL) {
         cache[msg.channelId] = channelCache.slice(-MAX_PER_CHANNEL);
     }
@@ -70,13 +71,12 @@ export function initMessageLogger(): () => void {
 
         if (action?.type === "MESSAGE_DELETE_BULK") {
             const ids: string[] = action.ids || [];
-            const channelId = action.channel_id;
             showToast(`🗑️ ${ids.length} messages bulk deleted in this channel.`);
         }
     });
 
-    // Hook MESSAGE_UPDATE for edit logging
-    const unpatchUpdate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
+    // Hook MESSAGE_UPDATE to detect edits and mark them in the UI
+    const unpatchUpdate = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
 
@@ -84,14 +84,25 @@ export function initMessageLogger(): () => void {
             const msgId = action.message.id;
             const channelId = action.message.channel_id;
             const cached = getCached(channelId, msgId);
-            if (cached && action.message.content !== cached.content) {
+            const newContent = action.message.content;
+
+            if (cached && newContent && newContent !== cached.content) {
+                // Show toast with old → new
                 showToast(
-                    `✏️ Edited by ${cached.authorName}: "${cached.content.slice(0, 60)}" → "${action.message.content.slice(0, 60)}"`
+                    `✏️ ${cached.authorName} edited: "${cached.content.slice(0, 50)}" → "${newContent.slice(0, 50)}"`
                 );
-                // Update cache with new content
+
+                // Inject a visible [edited] tag into the message content
+                // so it's obvious in the chat UI
+                if (!editedMarked.has(msgId)) {
+                    editedMarked.add(msgId);
+                    action.message.content = `[edited] ${newContent}`;
+                }
+
+                // Update cache
                 addMessage({
                     ...cached,
-                    content: action.message.content,
+                    content: newContent,
                 });
             }
         }
@@ -102,10 +113,8 @@ export function initMessageLogger(): () => void {
         unpatchCreate();
         unpatchDelete();
         unpatchUpdate();
-        // Clear cache
-        for (const key of Object.keys(cache)) {
-            delete cache[key];
-        }
+        editedMarked.clear();
+        for (const key of Object.keys(cache)) delete cache[key];
         logger.log("[Nether] Message logger unloaded.");
     };
 }
