@@ -1,98 +1,53 @@
 import { patcher } from "@vendetta";
-import { findByDisplayName, findByProps } from "@vendetta/metro";
+import { find, findByDisplayName, findByProps } from "@vendetta/metro";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";
 import SettingsComponent from "./Settings";
 
-/**
- * Add a Nether settings button to the Discord guild sidebar.
- * Tries multiple strategies to find the right component to patch.
- */
-
 let patches: (() => void)[] = [];
 let injected = false;
 
 export function initGuildButton(): () => void {
-    // Strategy 1: Patch GuildList component
-    try {
-        const gl = findDisplayName("GuildList");
-        if (gl) {
-            patches.push(patcher.after("default", gl, (_args: any[], ret: any) => {
-                if (!ret?.props) return;
-                const btn = makeBtn();
-                ret.props.children = Array.isArray(ret.props.children)
-                    ? [btn, ...ret.props.children]
-                    : [btn, ret.props.children];
-            }));
-            logger.log("[Nether] GuildButton: patched GuildList");
-            return cleanup();
-        }
-    } catch {}
-
-    // Strategy 2: Patch GuildsBar
-    try {
-        const gb = findDisplayName("GuildsBar");
-        if (gb) {
-            patches.push(patcher.after("default", gb, (_args: any[], ret: any) => {
+    // Strategy 1: Broad search for any matching component
+    const names = ["GuildList", "GuildsBar", "GuildIcon", "HomeButton", "GuildSidebar", "ServerList", "PrivateChannel", "ChannelsList"];
+    for (const name of names) {
+        try {
+            const mod = findByDisplayName(name) as any;
+            if (!mod) continue;
+            const target = typeof mod === "function" ? mod : mod.default ?? mod.render ?? mod;
+            if (typeof target !== "function") continue;
+            patches.push(patcher.after("default", target, (_args: any[], ret: any) => {
                 if (injected || !ret?.props) return;
                 injected = true;
                 const btn = makeBtn();
-                ret.props.children = Array.isArray(ret.props.children)
-                    ? [btn, ...ret.props.children]
-                    : [btn, ret.props.children];
+                ret.props.children = ret.props.children !== undefined
+                    ? (Array.isArray(ret.props.children) ? [btn, ...ret.props.children] : [btn, ret.props.children])
+                    : btn;
             }));
-            logger.log("[Nether] GuildButton: patched GuildsBar");
+            logger.log(`[Nether] GuildButton: patched ${name}`);
             return cleanup();
-        }
-    } catch {}
+        } catch {}
+    }
 
-    // Strategy 3: Patch HomeButton
+    // Strategy 2: find with custom predicate
     try {
-        const hb = findDisplayName("HomeButton");
-        if (hb) {
-            patches.push(patcher.after("default", hb, (_args: any[], ret: any) => {
+        const match = find((m: any) => {
+            if (typeof m !== "function" && typeof m !== "object") return false;
+            const dn = m?.displayName ?? m?.name ?? "";
+            return dn.includes("Guild") || dn.includes("Sidebar") || dn.includes("ServerList");
+        }) as any;
+        if (match) {
+            const target = typeof match === "function" ? match : match.default ?? match;
+            patches.push(patcher.after("default", target, (_args: any[], ret: any) => {
                 if (injected || !ret?.props) return;
                 injected = true;
                 const btn = makeBtn();
-                ret.props.children = Array.isArray(ret.props.children)
-                    ? [btn, ...ret.props.children]
-                    : [btn, ret.props.children];
+                ret.props.children = ret.props.children !== undefined
+                    ? (Array.isArray(ret.props.children) ? [btn, ...ret.props.children] : [btn, ret.props.children])
+                    : btn;
             }));
-            logger.log("[Nether] GuildButton: patched HomeButton");
-            return cleanup();
-        }
-    } catch {}
-
-    // Strategy 4: Patch GuildIcon
-    try {
-        const gi = findDisplayName("GuildIcon");
-        if (gi) {
-            patches.push(patcher.after("default", gi, (_args: any[], ret: any) => {
-                if (injected || !ret?.props) return;
-                injected = true;
-                const btn = makeBtn();
-                ret.props.children = Array.isArray(ret.props.children)
-                    ? [btn, ...ret.props.children]
-                    : [btn, ret.props.children];
-            }));
-            logger.log("[Nether] GuildButton: patched GuildIcon");
-            return cleanup();
-        }
-    } catch {}
-
-    // Strategy 5: Try finding by props
-    try {
-        const mod = findByProps("GuildList", "guilds") as any;
-        if (mod?.GuildList) {
-            patches.push(patcher.after("default", mod.GuildList, (_args: any[], ret: any) => {
-                if (!ret?.props) return;
-                const btn = makeBtn();
-                ret.props.children = Array.isArray(ret.props.children)
-                    ? [btn, ...ret.props.children]
-                    : [btn, ret.props.children];
-            }));
-            logger.log("[Nether] GuildButton: patched via findByProps");
+            logger.log("[Nether] GuildButton: patched via find()");
             return cleanup();
         }
     } catch {}
@@ -122,17 +77,10 @@ function makeBtn(): any {
     );
 }
 
-function findDisplayName(name: string): any {
-    try {
-        const m = findByDisplayName(name) as any;
-        return m?.default ?? m;
-    } catch { return null; }
-}
-
 function openSettings(): void {
     try {
         const nav = findByProps("pushLazy") as any;
-        if (nav?.pushLazy) {
+        if (typeof nav?.pushLazy === "function") {
             nav.pushLazy("BUNNY_CUSTOM_PAGE", {
                 title: "Nether",
                 render: () => React.createElement(SettingsComponent),
