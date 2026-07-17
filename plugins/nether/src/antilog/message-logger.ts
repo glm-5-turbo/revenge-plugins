@@ -1,6 +1,5 @@
-import { patcher } from "@vendetta";
+import { patcher, findByProps } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
-import { findByStoreName } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
@@ -14,184 +13,160 @@ interface CachedMessage {
     timestamp: string;
 }
 
-// In-memory cache — bounded to last 500 messages per channel
 const MAX_PER_CHANNEL = 500;
 const cache: Record<string, CachedMessage[]> = {};
-
-// Track messages we've already seen a MESSAGE_DELETE for — don't alert again
 const confirmedDeletes = new Set<string>();
-
-// Track messages we've shown a toast for (avoid duplicates)
 const notifiedMessages = new Set<string>();
 
-// Polling interval for silent delete detection
+interface EditRecord { content: string; editedAt: number; }
+const editHistory: Record<string, EditRecord[]> = {};
+
 let pollInterval: ReturnType<typeof setInterval> | null = null;
-const POLL_MS = 8_000; // check every 8 seconds
+const POLL_MS = 8_000;
+
+// ===== Cache helpers =====
 
 function addMessage(msg: CachedMessage): void {
     if (!cache[msg.channelId]) cache[msg.channelId] = [];
-    const channelCache = cache[msg.channelId];
-    if (channelCache.find((m) => m.id === msg.id)) return;
-    channelCache.push(msg);
-    if (channelCache.length > MAX_PER_CHANNEL) {
-        cache[msg.channelId] = channelCache.slice(-MAX_PER_CHANNEL);
-    }
+    const ch = cache[msg.channelId];
+    if (ch.find((m) => m.id === msg.id)) return;
+    ch.push(msg);
+    if (ch.length > MAX_PER_CHANNEL) cache[msg.channelId] = ch.slice(-MAX_PER_CHANNEL);
 }
 
 function getCached(channelId: string, messageId: string): CachedMessage | undefined {
     return cache[channelId]?.find((m) => m.id === messageId);
 }
 
-function removeFromCache(channelId: string, messageId: string): void {
-    if (!cache[channelId]) return;
-    cache[channelId] = cache[channelId].filter((m) => m.id !== messageId);
-    if (cache[channelId].length === 0) delete cache[channelId];
-}
+// ===== Row highlighting (red for deleted, blue for edited) =====
 
-/**
- * Periodic poll to detect "silent deletes" — messages that vanished
- * from the UI but never dispatched MESSAGE_DELETE (likely because
- * another plugin suppressed it via patcher.before).
- *
- * Compares our cache against Discord's MessageStore to find gaps.
- */
-function startSilentDeleteDetector(): void {
-    if (pollInterval) return;
+let unpatchRows: (() => void) | null = null;
 
-    pollInterval = setInterval(() => {
-        if (!storage.messageLogger) return;
+function patchRowManager(): void {
+    try {
+        const gen = findByProps("generate", "updateRows") as any;
+        if (!gen?.generate) return;
 
-        try {
-            const MessageStore = findByStoreName("MessageStore") as any;
-            if (!MessageStore) return;
+        unpatchRows = patcher.after("generate", gen, (_args: any[], ret: any) => {
+            if (!storage.messageLogger) return ret;
+            const rows: any[] = Array.isArray(ret) ? ret : ret?.rows ?? [];
+            for (const row of rows) {
+                const msg = row?.message;
+                if (!msg?.id || !msg?.channel_id) continue;
+                const key = `${msg.channel_id}:${msg.id}`;
 
-            for (const [channelId, msgs] of Object.entries(cache)) {
-                const cachedMsgs = msgs as CachedMessage[];
-                const channelMessages = MessageStore.getMessages(channelId);
-                if (!channelMessages) continue;
+                if (confirmedDeletes.has(key) || msg.__vml_deleted) {
+                    row.backgroundHighlight = { backgroundColor: "#da373c22", gutterColor: "#da373cff" };
+                    msg.edited = "deleted";
+                    msg.__vml_deleted = true;
+                }
 
-                for (const cached of cachedMsgs) {
-                    const key = `${channelId}:${cached.id}`;
-
-                    // Skip messages we already handled
-                    if (confirmedDeletes.has(key)) continue;
-                    if (notifiedMessages.has(key)) continue;
-
-                    // Check if the message still exists in the store
-                    const stillExists = channelMessages.get(cached.id) != null;
-                    if (!stillExists) {
-                        // Message vanished without a MESSAGE_DELETE event!
-                        // This means someone's anti-log suppressed it
-                        notifiedMessages.add(key);
-                        showToast(
-                            `🕵️ Silent delete (anti-log blocked): "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}" — ${cached.authorName}`
-                        );
-                    }
+                const edits = editHistory[key];
+                if (edits && edits.length > 0 && !msg.__vml_deleted) {
+                    row.backgroundHighlight = { backgroundColor: "#2f6feb22", gutterColor: "#2f6febff" };
+                    msg.edited = `edited (${edits.length})`;
                 }
             }
-        } catch (e) {
-            // Polling errors are non-critical — skip this cycle
-        }
+            return ret;
+        });
+    } catch (e) {
+        logger.error("[Nether] RowManager patch failed:", e);
+    }
+}
+
+function unpatchRowManager(): void {
+    if (unpatchRows) { unpatchRows(); unpatchRows = null; }
+}
+
+// ===== Silent delete detection =====
+
+function startSilentDeleteDetector(): void {
+    if (pollInterval) return;
+    pollInterval = setInterval(() => {
+        if (!storage.messageLogger) return;
+        try {
+            const { findByStoreName } = require("@vendetta/metro");
+            const MS = findByStoreName("MessageStore") as any;
+            if (!MS) return;
+            for (const [channelId, msgs] of Object.entries(cache)) {
+                const cachedMsgs = msgs as CachedMessage[];
+                const chMsgs = MS.getMessages(channelId);
+                if (!chMsgs) continue;
+                for (const c of cachedMsgs) {
+                    const key = `${channelId}:${c.id}`;
+                    if (confirmedDeletes.has(key) || notifiedMessages.has(key)) continue;
+                    if (chMsgs.get(c.id) != null) continue;
+                    notifiedMessages.add(key);
+                    confirmedDeletes.add(key);
+                    showToast(`🕵️ Silent delete: "${c.content.slice(0, 80)}${c.content.length > 80 ? "..." : ""}" — ${c.authorName}`);
+                }
+            }
+        } catch {}
     }, POLL_MS);
 }
 
 function stopSilentDeleteDetector(): void {
-    if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-    }
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
 }
 
+// ===== Main init =====
+
 export function initMessageLogger(): () => void {
-    // Hook MESSAGE_CREATE to cache all incoming messages
+    patchRowManager();
+
     const unpatchCreate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
-
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const m = action.message;
-            addMessage({
-                id: m.id,
-                channelId: m.channel_id,
-                authorId: m.author?.id || "",
-                authorName: m.author?.username || "Unknown",
-                content: m.content || "",
-                timestamp: m.timestamp || "",
-            });
+            addMessage({ id: m.id, channelId: m.channel_id, authorId: m.author?.id || "", authorName: m.author?.username || "Unknown", content: m.content || "", timestamp: m.timestamp || "" });
         }
     });
 
-    // Hook MESSAGE_DELETE to show cached content
     const unpatchDelete = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
-
         if (action?.type === "MESSAGE_DELETE") {
-            const msgId = action.id;
-            const channelId = action.channel_id;
-            const key = `${channelId}:${msgId}`;
-
-            // Mark as confirmed delete so silent detector skips it
+            const key = `${action.channel_id}:${action.id}`;
             confirmedDeletes.add(key);
-
-            const cached = getCached(channelId, msgId);
-            if (cached) {
-                // Show a nice delete toast — highlighted to show it was caught
-                showToast(
-                    `🗑️ Deleted: "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}" — ${cached.authorName}`
-                );
-                removeFromCache(channelId, msgId);
-            }
+            const cached = getCached(action.channel_id, action.id);
+            if (cached) showToast(`🗑️ Deleted by ${cached.authorName}: "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}"`);
         }
-
         if (action?.type === "MESSAGE_DELETE_BULK") {
             const ids: string[] = action.ids || [];
-            const channelId = action.channel_id || "";
-            for (const id of ids) {
-                confirmedDeletes.add(`${channelId}:${id}`);
-            }
+            for (const id of ids) confirmedDeletes.add(`${action.channel_id}:${id}`);
             showToast(`🗑️ ${ids.length} messages bulk deleted`);
         }
     });
 
-    // Hook MESSAGE_UPDATE to detect edits
     const unpatchUpdate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
-
         if (action?.type === "MESSAGE_UPDATE" && action.message) {
             const msgId = action.message.id;
             const channelId = action.message.channel_id;
+            const key = `${channelId}:${msgId}`;
             const cached = getCached(channelId, msgId);
             const newContent = action.message.content;
-
             if (cached && newContent && newContent !== cached.content) {
-                // Show formatted edit toast
-                showToast(
-                    `✏️ ${cached.authorName} edited: "${cached.content.slice(0, 50)}" → "${newContent.slice(0, 50)}"`
-                );
-
-                // Update cache
-                addMessage({
-                    ...cached,
-                    content: newContent,
-                });
+                if (!editHistory[key]) editHistory[key] = [];
+                editHistory[key].push({ content: cached.content, editedAt: Date.now() });
+                if (editHistory[key].length > 10) editHistory[key] = editHistory[key].slice(-10);
+                showToast(`✏️ ${cached.authorName} edited: "${cached.content.slice(0, 45)}" → "${newContent.slice(0, 45)}"`);
+                addMessage({ ...cached, content: newContent });
             }
         }
     });
 
-    // Start periodic check for silent deletes (anti-anti-log)
     startSilentDeleteDetector();
 
     logger.log("[Nether] Message logger initialized.");
     return () => {
-        unpatchCreate();
-        unpatchDelete();
-        unpatchUpdate();
-        stopSilentDeleteDetector();
-        for (const key of Object.keys(cache)) delete cache[key];
-        confirmedDeletes.clear();
-        notifiedMessages.clear();
+        unpatchCreate(); unpatchDelete(); unpatchUpdate();
+        unpatchRowManager(); stopSilentDeleteDetector();
+        for (const k of Object.keys(cache)) delete cache[k];
+        for (const k of Object.keys(editHistory)) delete editHistory[k];
+        confirmedDeletes.clear(); notifiedMessages.clear();
         logger.log("[Nether] Message logger unloaded.");
     };
 }
