@@ -1,169 +1,109 @@
 import { registerCommand } from "@vendetta/commands";
-import { findByProps } from "@vendetta";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { showToast } from "@vendetta/ui/toasts";
+import { safeFetch, findByProps } from "@vendetta";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 let unregCommand: (() => void) | null = null;
 
-// Use Discord's built-in HTTP module (already authenticated)
-function getHTTP(): any {
-    try {
-        const http = findByProps("get", "post", "put", "delete", "patch");
-        if (http?.get) return http;
-    } catch {}
-    try {
-        const http = findByProps("HTTP", "request");
-        if (http?.HTTP) return http.HTTP;
-    } catch {}
-    // Fallback: try the window vendetta object
-    try {
-        const v = (window as any).vendetta;
-        if (v?.http) return v.http;
-    } catch {}
-    return null;
-}
-
-async function discordRequest(method: string, path: string, body?: any): Promise<any> {
-    const http = getHTTP();
-    if (!http) throw new Error("Could not find Discord HTTP module");
-
-    const url = path.startsWith("/api/") ? path : `/api/v10${path}`;
-
-    try {
-        if (http.request) {
-            return await http.request({ method, url, body, headers: { "Content-Type": "application/json" } });
-        }
-        if (http[method.toLowerCase()]) {
-            const res = await http[method.toLowerCase()](url, body, undefined, { "Content-Type": "application/json" });
-            if (res?.body) return typeof res.body === "string" ? JSON.parse(res.body) : res.body;
-            return res;
-        }
-        throw new Error(`No method ${method} on HTTP module`);
-    } catch (e: any) {
-        throw new Error(`Discord API ${method} ${path}: ${e.message || e}`);
+// Try to extract Discord token from the running client
+function getToken(): string {
+    // Common patterns used across Discord builds
+    const patterns = [
+        () => findByProps("getToken")?.getToken?.(),
+        () => findByProps("getToken", "getSuperProperties")?.getToken?.(),
+        () => findByProps("HTTP", "request")?.HTTP?._token,
+        () => findByProps("API", "api")?.API?._token,
+    ];
+    for (const fn of patterns) {
+        try { const t = fn(); if (t) return t; } catch {}
     }
+    return "";
 }
 
-async function fetchMessages(channelId: string, limit: number): Promise<any[]> {
-    return await discordRequest("GET", `/channels/${channelId}/messages?limit=${Math.min(limit, 100)}`) || [];
-}
+async function discordApi(method: string, path: string, body?: any): Promise<any> {
+    const token = getToken();
+    if (!token) throw new Error("Could not find Discord auth token");
 
-async function bulkDelete(channelId: string, messageIds: string[]): Promise<void> {
-    // Discord bulk delete max 100 per request, rate limit between batches
-    for (let i = 0; i < messageIds.length; i += 100) {
-        const batch = messageIds.slice(i, i + 100);
-        await discordRequest("POST", `/channels/${channelId}/messages/bulk-delete`, { messages: batch });
-        if (i + 100 < messageIds.length) {
-            await new Promise(r => setTimeout(r, storage.purgeDelay));
-        }
-    }
+    const url = `https://discord.com/api/v10${path}`;
+    const res = await safeFetch(url, {
+        method,
+        headers: {
+            Authorization: token,
+            "Content-Type": "application/json",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+
+    return res.json().catch(() => null);
 }
 
 export function initPurge(): () => void {
     unregCommand = registerCommand({
-        name: "nether",
-        displayName: "Nether",
-        description: "Nether plugin — purge, auto, tweaks",
-        displayDescription: "Nether plugin — purge, auto, tweaks",
-        applicationId: "0",
+        name: "purge",
+        displayName: "Purge",
+        description: "Delete your last N messages in this channel",
+        displayDescription: "Delete your last N messages in this channel",
+        applicationId: "-1",
         type: 1 as any,
         inputType: 1 as any,
         options: [
             {
-                name: "purge",
-                displayName: "Purge",
-                description: "Delete your last messages",
-                displayDescription: "Delete your last messages",
-                type: 4 as any, // INTEGER — count of messages
+                name: "count",
+                displayName: "Count",
+                description: "Number of messages to delete (1-100)",
+                displayDescription: "Number of messages to delete (1-100)",
+                type: 4 as any, // INTEGER
                 required: true,
-            },
-            {
-                name: "user",
-                displayName: "User",
-                description: "Only delete messages that mention this user (optional)",
-                displayDescription: "Only delete messages that mention this user",
-                type: 6 as any, // USER
-                required: false,
             },
         ],
         execute: async (args: any[], ctx: any) => {
             const channelId = ctx.channel?.id;
-            if (!channelId) return { content: "❌ No channel context." };
+            if (!channelId) return { content: "❌ No channel." };
 
-            // Parse args — args is an array of { name, value } objects
-            let count = 5;
-            let targetUserId: string | null = null;
-
-            for (const arg of args || []) {
-                if (arg?.name === "purge" && arg?.value) {
-                    count = Math.min(Math.max(parseInt(arg.value) || 5, 1), 100);
-                }
-                if (arg?.name === "user" && arg?.value) {
-                    targetUserId = arg.value;
-                }
-            }
+            const count = Math.min(Math.max(parseInt(args?.[0]?.value) || 5, 1), 100);
 
             const doPurge = async () => {
                 try {
-                    showToast(`🔄 Fetching last ${count} messages...`);
+                    // Get own user
+                    const me = await discordApi("GET", "/users/@me");
+                    const ownId = me?.id;
+                    if (!ownId) { showToast("❌ Could not identify you"); return; }
 
-                    // Get our own user ID
-                    const me = await discordRequest("GET", "/users/@me");
-                    const ownId = me?.id || "";
-                    if (!ownId) {
-                        showToast("❌ Could not determine your user ID");
-                        return;
+                    // Fetch messages
+                    const msgs = await discordApi("GET", `/channels/${channelId}/messages?limit=${count}`);
+                    if (!Array.isArray(msgs)) { showToast("❌ Failed to fetch messages"); return; }
+
+                    const ownMsgIds = msgs.filter(m => m?.author?.id === ownId).map(m => m.id);
+                    if (ownMsgIds.length === 0) { showToast("✅ No messages to delete"); return; }
+
+                    // Bulk delete
+                    for (let i = 0; i < ownMsgIds.length; i += 100) {
+                        await discordApi("POST", `/channels/${channelId}/messages/bulk-delete`, {
+                            messages: ownMsgIds.slice(i, i + 100),
+                        });
                     }
-
-                    const msgs = await fetchMessages(channelId, count);
-                    const ownMsgs = msgs.filter((m: any) => m.author?.id === ownId);
-
-                    if (targetUserId) {
-                        // Filter to messages that mention the target user
-                        const filtered = ownMsgs.filter((m: any) =>
-                            m.mentions?.some((u: any) => u.id === targetUserId) ||
-                            m.content?.includes(`<@${targetUserId}>`)
-                        );
-                        if (filtered.length === 0) {
-                            showToast("✅ No matching messages found.");
-                            return;
-                        }
-                        const ids = filtered.map((m: any) => m.id);
-                        await bulkDelete(channelId, ids);
-                        showToast(`✅ Deleted ${ids.length} messages targeting user`);
-                    } else {
-                        const ids = ownMsgs.map((m: any) => m.id);
-                        if (ids.length === 0) {
-                            showToast("✅ No messages to delete.");
-                            return;
-                        }
-                        await bulkDelete(channelId, ids);
-                        showToast(`✅ Deleted ${ids.length} messages`);
-                    }
+                    showToast(`✅ Deleted ${ownMsgIds.length} messages`);
                 } catch (e: any) {
-                    showToast(`❌ Purge failed: ${e.message}`);
+                    showToast(`❌ ${e.message}`);
                     logger.error("[Nether] Purge error:", e);
                 }
             };
 
             if (storage.purgeConfirm) {
                 showConfirmationAlert({
-                    title: "Purge Messages",
-                    content: targetUserId
-                        ? `Delete your last ${count} messages that mention that user?`
-                        : `Delete your last ${count} messages?`,
+                    title: "Purge",
+                    content: `Delete your last ${count} messages?`,
                     confirmText: "Purge",
                     confirmColor: "red" as any,
                     onConfirm: doPurge,
                     cancelText: "Cancel",
                 });
             } else {
-                await doPurge();
+                doPurge();
             }
-
-            return { content: `🗑️ Purging ${count} messages...` };
+            return { content: `Purging ${count} messages...` };
         },
     });
 
