@@ -1,5 +1,5 @@
 import { patcher } from "@vendetta";
-import { find, findByName, findByDisplayName, findByProps } from "@vendetta/metro";
+import { find, findByName, findByProps } from "@vendetta/metro";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";
@@ -10,15 +10,14 @@ let injected = false;
 
 export function initGuildButton(): () => void {
     // The "Add Server" button is always visible in the guild list.
-    // Finding it gives us an injection point. On Discord mobile,
-    // it's known as GuildAddButton, CreateGuildButton, etc.
+    // Finding it gives us an injection point.
     const btnNames = [
         "GuildCreateButton", "CreateGuildButton", "GuildAddButton",
         "AddGuildButton", "ActionButton", "GuildActionButton",
         "CreateGuild", "GuildCreate", "AddServerButton",
     ];
 
-    // Also look for the "+" button or compass button by name
+    // Find by function name
     for (const name of btnNames) {
         try {
             const mod = findByName(name, false) as any;
@@ -26,10 +25,9 @@ export function initGuildButton(): () => void {
                 patches.push(patcher.after("default", mod, (_a: any[], ret: any) => {
                     if (injected || !ret?.props) return;
                     injected = true;
-                    const children = Array.isArray(ret.props.children)
-                        ? [ret.props.children, makeBtn()]
+                    ret.props.children = Array.isArray(ret.props.children)
+                        ? [...ret.props.children, makeBtn()]
                         : [ret.props.children, makeBtn()];
-                    ret.props.children = children;
                     logger.log(`[Nether] GuildButton: injected next to ${name}`);
                 }));
                 return cleanup();
@@ -37,10 +35,10 @@ export function initGuildButton(): () => void {
         } catch {}
     }
 
-    // Same but with findByDisplayName
+    // Find by displayName
     for (const name of btnNames) {
         try {
-            const mod = findByDisplayName(name) as any;
+            const mod = findByName(name, true) as any;
             if (!mod) continue;
             const target = mod.default ?? mod;
             if (typeof target !== "function") continue;
@@ -48,7 +46,7 @@ export function initGuildButton(): () => void {
                 if (injected || !ret?.props) return;
                 injected = true;
                 ret.props.children = Array.isArray(ret.props.children)
-                    ? [ret.props.children, makeBtn()]
+                    ? [...ret.props.children, makeBtn()]
                     : [ret.props.children, makeBtn()];
                 logger.log(`[Nether] GuildButton: injected next to ${name} (dn)`);
             }));
@@ -56,7 +54,7 @@ export function initGuildButton(): () => void {
         } catch {}
     }
 
-    // Try to find the "guild actions" row component
+    // Try the guild actions row component
     try {
         const rowNames = ["GuildActionRow", "GuildActions", "GuildToolbar", "GuildListActionRow"];
         for (const name of rowNames) {
@@ -71,7 +69,7 @@ export function initGuildButton(): () => void {
                     if (injected || !ret?.props) return;
                     injected = true;
                     ret.props.children = Array.isArray(ret.props.children)
-                        ? [ret.props.children, makeBtn()]
+                        ? [...ret.props.children, makeBtn()]
                         : [ret.props.children, makeBtn()];
                     logger.log(`[Nether] GuildButton: injected via ${name}`);
                 }));
@@ -101,14 +99,43 @@ function makeBtn(): any {
     );
 }
 
+/**
+ * Open Nether settings as a custom page.
+ *
+ * Uses Discord's global Navigation.push() pattern (from ViewRaw plugin).
+ * findByProps("pushLazy") is just used to find the navigation module — its
+ * actual method `push` accepts a component reference, not a route name.
+ *
+ * The pushed component is Discord's Navigator wrapping our Settings page.
+ */
 function openSettings(): void {
     try {
-        const nav = findByProps("pushLazy") as any;
-        if (typeof nav?.pushLazy === "function") {
-            nav.pushLazy("BUNNY_CUSTOM_PAGE", { title: "Nether", render: () => React.createElement(SettingsComponent) });
+        const Navigation = findByProps("push", "pop", "replace") as any;
+        const Navigator = (findByName("Navigator") ?? findByProps("Navigator")?.Navigator) as any;
+        const headerModule = findByProps("getRenderCloseButton") ?? findByProps("getHeaderCloseButton") as any;
+        const renderCloseButton = headerModule?.getRenderCloseButton ?? headerModule?.getHeaderCloseButton;
+
+        if (typeof Navigation?.push === "function" && Navigator) {
+            const NetherNavigator = () =>
+                React.createElement(Navigator, {
+                    initialRouteName: "NetherSettings",
+                    goBackOnBackPress: true,
+                    screens: {
+                        NetherSettings: {
+                            title: "Nether",
+                            headerLeft: renderCloseButton?.(() => Navigation.pop()),
+                            render: SettingsComponent,
+                        },
+                    },
+                });
+            Navigation.push(NetherNavigator);
             return;
         }
-    } catch {}
+    } catch (e) {
+        logger.error("[Nether] openSettings failed:", e);
+    }
+
+    // Fallback: just toast a hint
     showToast("⚙️ Nether: Settings → Plugins → Nether");
 }
 

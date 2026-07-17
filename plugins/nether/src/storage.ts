@@ -7,6 +7,8 @@ const defaults = {
     antiPurgeLog: false,
     antiPurgeLogMessage: "‎",
     messageLogger: false,
+    messageLoggerShowHistory: true,
+    antiLogKeepDeleted: false,
 
     // Purge — works via API (if token found)
     purgeDelay: 100,

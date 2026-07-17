@@ -29,7 +29,13 @@ const POLL_MS = 8_000;
 function addMessage(msg: CachedMessage): void {
     if (!cache[msg.channelId]) cache[msg.channelId] = [];
     const ch = cache[msg.channelId];
-    if (ch.find((m) => m.id === msg.id)) return;
+    // Update if exists, append if not (so edits update cache content too)
+    const existing = ch.find((m) => m.id === msg.id);
+    if (existing) {
+        existing.content = msg.content;
+        existing.authorName = msg.authorName || existing.authorName;
+        return;
+    }
     ch.push(msg);
     if (ch.length > MAX_PER_CHANNEL) cache[msg.channelId] = ch.slice(-MAX_PER_CHANNEL);
 }
@@ -38,9 +44,44 @@ function getCached(channelId: string, messageId: string): CachedMessage | undefi
     return cache[channelId]?.find((m) => m.id === messageId);
 }
 
-// ===== Row highlighting (red for deleted, blue for edited) =====
+// ===== Toast formatting (multi-line with author + content on separate lines) =====
+
+function preview(s: string, n: number): string {
+    // Strip newlines so the toast stays a clean one-liner per cell
+    const flat = s.replace(/\s+/g, " ").trim();
+    return flat.length > n ? flat.slice(0, n) + "…" : flat;
+}
+
+function toastDeletedBy(authorName: string, content: string): void {
+    showToast(`🗑️  Deleted message\n👤 ${authorName}\n“${preview(content, 120)}”`);
+}
+
+function toastSilentDelete(authorName: string, content: string): void {
+    showToast(`🕵️  Silent delete (no event)\n👤 ${authorName}\n“${preview(content, 120)}”`);
+}
+
+function toastEdited(authorName: string, oldContent: string, newContent: string): void {
+    showToast(
+        `✏️  Edited message\n👤 ${authorName}\n` +
+        `− “${preview(oldContent, 60)}”\n` +
+        `+ “${preview(newContent, 60)}”`
+    );
+}
+
+function toastBulkDeleted(count: number): void {
+    showToast(`🗑️  Bulk delete\n${count} message${count === 1 ? "" : "s"} removed`);
+}
+
+// ===== Row highlighting (red for deleted, blue for edited, with edit history) =====
 
 let unpatchRows: (() => void) | null = null;
+
+const RED_BG = "#da373c22";     // ~13% opacity danger red
+const RED_GUTTER = "#da373cff";  // solid red
+const BLUE_BG = "#2f6feb22";
+const BLUE_GUTTER = "#2f6febff";
+
+const EDIT_SEPARATOR = "`[ EDITED ]`"; // Discord renders backticks as inline code
 
 function patchRowManager(): void {
     try {
@@ -56,15 +97,23 @@ function patchRowManager(): void {
                 const key = `${msg.channel_id}:${msg.id}`;
 
                 if (confirmedDeletes.has(key) || msg.__vml_deleted) {
-                    row.backgroundHighlight = { backgroundColor: "#da373c22", gutterColor: "#da373cff" };
+                    row.backgroundHighlight = { backgroundColor: RED_BG, gutterColor: RED_GUTTER };
                     msg.edited = "deleted";
                     msg.__vml_deleted = true;
                 }
 
                 const edits = editHistory[key];
                 if (edits && edits.length > 0 && !msg.__vml_deleted) {
-                    row.backgroundHighlight = { backgroundColor: "#2f6feb22", gutterColor: "#2f6febff" };
+                    row.backgroundHighlight = { backgroundColor: BLUE_BG, gutterColor: BLUE_GUTTER };
                     msg.edited = `edited (${edits.length})`;
+                    // Render edit history inline below the current content
+                    // (matches the Rain / Surge / Angelix pattern)
+                    if (storage.messageLoggerShowHistory && typeof msg.content === "string") {
+                        const history = edits
+                            .map((e) => preview(e.content, 200))
+                            .join(`\n${EDIT_SEPARATOR}\n`);
+                        msg.content = `${history}\n${EDIT_SEPARATOR}\n${msg.content}`;
+                    }
                 }
             }
             return ret;
@@ -98,7 +147,7 @@ function startSilentDeleteDetector(): void {
                     if (chMsgs.get(c.id) != null) continue;
                     notifiedMessages.add(key);
                     confirmedDeletes.add(key);
-                    showToast(`🕵️ Silent delete: "${c.content.slice(0, 80)}${c.content.length > 80 ? "..." : ""}" — ${c.authorName}`);
+                    toastSilentDelete(c.authorName, c.content);
                 }
             }
         } catch {}
@@ -119,23 +168,35 @@ export function initMessageLogger(): () => void {
         if (!storage.messageLogger) return;
         if (action?.type === "MESSAGE_CREATE" && action.message) {
             const m = action.message;
-            addMessage({ id: m.id, channelId: m.channel_id, authorId: m.author?.id || "", authorName: m.author?.username || "Unknown", content: m.content || "", timestamp: m.timestamp || "" });
+            addMessage({
+                id: m.id, channelId: m.channel_id,
+                authorId: m.author?.id || "",
+                authorName: m.author?.username || "Unknown",
+                content: m.content || "",
+                timestamp: m.timestamp || "",
+            });
         }
     });
 
     const unpatchDelete = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
+
+        // Support both channelId (camelCase, mobile) and channel_id (snake_case)
+        const channelId = action.channel_id ?? action.channelId;
+        const msgId = action.id;
+
         if (action?.type === "MESSAGE_DELETE") {
-            const key = `${action.channel_id}:${action.id}`;
+            const key = `${channelId}:${msgId}`;
             confirmedDeletes.add(key);
-            const cached = getCached(action.channel_id, action.id);
-            if (cached) showToast(`🗑️ Deleted by ${cached.authorName}: "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}"`);
+            const cached = getCached(channelId, msgId);
+            if (cached) toastDeletedBy(cached.authorName, cached.content);
         }
+
         if (action?.type === "MESSAGE_DELETE_BULK") {
             const ids: string[] = action.ids || [];
-            for (const id of ids) confirmedDeletes.add(`${action.channel_id}:${id}`);
-            showToast(`🗑️ ${ids.length} messages bulk deleted`);
+            for (const id of ids) confirmedDeletes.add(`${channelId}:${id}`);
+            toastBulkDeleted(ids.length);
         }
     });
 
@@ -144,7 +205,7 @@ export function initMessageLogger(): () => void {
         if (!storage.messageLogger) return;
         if (action?.type === "MESSAGE_UPDATE" && action.message) {
             const msgId = action.message.id;
-            const channelId = action.message.channel_id;
+            const channelId = action.message.channel_id ?? action.message.channelId;
             const key = `${channelId}:${msgId}`;
 
             // Handle __vml_deleted marker (from anti-purge-log conversion)
@@ -155,11 +216,12 @@ export function initMessageLogger(): () => void {
 
             const cached = getCached(channelId, msgId);
             const newContent = action.message.content;
-            if (cached && newContent && newContent !== cached.content) {
+            if (cached && typeof newContent === "string" && newContent !== cached.content) {
                 if (!editHistory[key]) editHistory[key] = [];
                 editHistory[key].push({ content: cached.content, editedAt: Date.now() });
                 if (editHistory[key].length > 10) editHistory[key] = editHistory[key].slice(-10);
-                showToast(`✏️ ${cached.authorName} edited: "${cached.content.slice(0, 45)}" → "${newContent.slice(0, 45)}"`);
+                toastEdited(cached.authorName, cached.content, newContent);
+                // Update cache with the new content so the next edit diff is correct
                 addMessage({ ...cached, content: newContent });
             }
         }

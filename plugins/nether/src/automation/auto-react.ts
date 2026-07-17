@@ -7,50 +7,60 @@ import { logger } from "@vendetta";
 
 let ownUserId = "";
 
-// Track when we last sent a message to anyone
-// Used for the 1-minute activity window in DMs
-let lastOwnMessageTime = 0;
+// Track when we last sent a message in each channel
+// channel_id -> timestamp of our last MESSAGE_CREATE
+const lastOwnActivity: Record<string, number> = {};
 
 export function initAutoReact(): () => void {
     const UserStore = findByStoreName("UserStore") as any;
     ownUserId = UserStore?.getCurrentUser()?.id || "";
 
-    // Track our own messages
+    // Track our own outgoing messages (used for the 1-minute activity window)
     const unTrack = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (action?.type !== "MESSAGE_CREATE" || !action.message) return;
         const m = action.message;
         if (m.author?.id !== ownUserId) return;
-        lastOwnMessageTime = Date.now();
+        lastOwnActivity[m.channel_id] = Date.now();
     });
 
-    // Auto-react only in DMs, only if we sent a message in the last 60s
+    // Main auto-react handler
     const unReact = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
         const action = args[0];
         if (!storage.autoReactEnabled) return;
         if (action?.type !== "MESSAGE_CREATE" || !action.message) return;
 
         const m = action.message;
+        // Don't react to own messages or bots
         if (m.author?.id === ownUserId || m.author?.bot) return;
-        if (m.guild_id) return; // DMs only — no server channels
 
-        const recentlyActive = (Date.now() - lastOwnMessageTime) < 60_000;
-        if (!recentlyActive) return;
+        const channelId = m.channel_id;
+        const guildId = m.guild_id;
+
+        // Only react in DMs (private chats) — never in server channels
+        const isDM = !guildId;
+        if (!isDM) return;
+
+        // Only react if we sent a message in this DM within the last 1 minute
+        const lastActive = lastOwnActivity[channelId] || 0;
+        const isRecent = Date.now() - lastActive < 60_000; // 1 minute
+        if (!isRecent) return;
 
         const emoji = storage.autoReactEmoji || "✅";
+
         try {
-            const encoded = encodeURIComponent(emoji);
-            await discordApi("PUT", `/channels/${m.channel_id}/messages/${m.id}/reactions/${encoded}/@me`);
+            const encodedEmoji = encodeURIComponent(emoji);
+            await discordApi("PUT", `/channels/${channelId}/messages/${m.id}/reactions/${encodedEmoji}/@me`);
         } catch (e: any) {
             logger.error("[Nether] Auto-react failed:", e.message);
         }
     });
 
-    logger.log("[Nether] Auto-react initialized.");
+    logger.log("[Nether] Auto-react initialized (DMs only, 1min activity).");
     return () => {
         unTrack();
         unReact();
-        lastOwnMessageTime = 0;
+        for (const key of Object.keys(lastOwnActivity)) delete lastOwnActivity[key];
         logger.log("[Nether] Auto-react unloaded.");
     };
 }

@@ -79,6 +79,13 @@ export default function SettingsPanel() {
                         />}
                         <FormDivider />
                         <S label="Message Logger" value={!!storage.messageLogger} onValueChange={(v) => { storage.messageLogger = v; }} />
+                        {storage.messageLogger && <>
+                            <FormDivider />
+                            <S label="Show Edit History Inline" value={!!storage.messageLoggerShowHistory} onValueChange={(v) => { storage.messageLoggerShowHistory = v; }} />
+                        </>}
+                        <FormDivider />
+                        <S label="Keep Deleted Locally (Anti-Log)" value={!!storage.antiLogKeepDeleted} onValueChange={(v) => { storage.antiLogKeepDeleted = v; }} />
+                        <FormRow label="Local-only: shows your deletes in YOUR client" />
                     </FormSection>
                 </View>
             )}
