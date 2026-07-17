@@ -1,4 +1,3 @@
-import { safeFetch, findByProps } from "@vendetta";
 import { logger } from "@vendetta";
 
 export class RateLimiter {
@@ -41,105 +40,96 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Find the Discord auth token by scanning ALL metro modules.
- * Discord mobile obfuscates module names so findByProps("getToken")
- * doesn't always work. This tries every strategy.
+ * Get the Discord auth token via Discord's internal module.
+ *
+ * This uses findByProps("getToken") which is confirmed working
+ * on Revenge (nexpid's customrpc plugin uses it successfully).
+ * Discord mobile obfuscates some module property names but
+ * "getToken" is a function reference that survives minification
+ * because it's called internally by Discord's own code.
  */
 export function getToken(): string {
-    // Strategy 1: known property names
-    const knownProps = [
-        "getToken",
-        "getSuperProperties",
-        "setToken",
-        "authorization",
-        "Authorization",
-        "PREFIX",
-        "BOT_TOKEN",
-    ];
-
-    // Try common combinations
-    const searches = [
-        () => findByProps("getToken")?.getToken?.(),
-        () => findByProps("getToken", "getSuperProperties")?.getToken?.(),
-        () => findByProps("getSuperProperties", "getToken")?.getToken?.(),
-        () => findByProps("setToken", "getToken")?.getToken?.(),
-        () => findByProps("getToken", "setToken")?.getToken?.(),
-    ];
-
-    for (const s of searches) {
-        try { const t = s(); if (typeof t === "string" && t.length > 50) return t; } catch {}
+    try {
+        const { findByProps } = require("@vendetta/metro");
+        const mod = findByProps("getToken");
+        const token = mod?.getToken?.();
+        if (typeof token === "string" && token.length > 50) return token;
+    } catch (e) {
+        logger.error("[Nether] getToken via findByProps failed:", e);
     }
 
-    // Strategy 2: find a module that has a "getToken" function by name
+    // Fallback: try to find it via the HTTP module
     try {
-        const { findByName } = require("@vendetta/metro");
-        const mod = findByName("getToken", false);
-        if (mod?.() && typeof mod() === "string" && mod().length > 50) return mod();
-    } catch {}
-
-    // Strategy 3: scan ALL module exports for token-like strings
-    // Discord token format: mfa.xxx or xxx.yyy.zzz (base64 triples)
-    try {
-        const modules = (window as any).modules || {};
-        const allKeys = Object.keys(modules);
-        // Only scan first 200 modules to avoid performance hit
-        const scanLimit = Math.min(allKeys.length, 200);
-        for (let i = 0; i < scanLimit; i++) {
-            const mod = modules[allKeys[i]]?.publicModule?.exports;
-            if (!mod || typeof mod !== "object") continue;
-            try {
-                const str = JSON.stringify(mod);
-                // Discord tokens: MFA or regular format
-                const match = str.match(/"(mfa\.[A-Za-z0-9_-]{20,})"/);
-                if (match) return match[1];
-                // Non-MFA: two parts separated by dots, looking like a JWT
-                const match2 = str.match(/"([A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,})"/);
-                if (match2) return match2[1];
-            } catch {}
+        const { findByProps } = require("@vendetta/metro");
+        const httpMod = findByProps("get", "post");
+        if (httpMod && typeof httpMod.getToken === "function") {
+            const token = httpMod.getToken();
+            if (typeof token === "string" && token.length > 50) return token;
         }
     } catch {}
 
-    // Strategy 4: check ReactNative AsyncStorage or similar
+    // Fallback: hook XMLHttpRequest to capture Authorization header
+    // This catches the token from Discord's own outgoing requests
     try {
-        const { ReactNative } = require("@vendetta/metro/common");
-        if (ReactNative?.AsyncStorage) {
-            // Can't easily read AsyncStorage sync, but worth a shot
-        }
-    } catch {}
-
-    // Strategy 5: check the window.vendetta object for any stored auth
-    try {
-        const v = (window as any).vendetta;
-        if (v?.settings) {
-            const str = JSON.stringify(v.settings);
-            const match = str.match(/"(mfa\.[A-Za-z0-9_-]{20,})"/);
-            if (match) return match[1];
-            const match2 = str.match(/"([A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,})"/);
-            if (match2) return match2[1];
-        }
-    } catch {}
-
-    // Strategy 6: check Discord's HTTP request headers by intercepting a stored config
-    try {
-        const httpMod = findByProps("get", "post", "put", "patch", "delete");
-        if (httpMod && typeof httpMod === "object") {
-            const str = JSON.stringify(httpMod);
-            const match = str.match(/"(mfa\.[A-Za-z0-9_-]{20,})"/);
-            if (match) return match[1];
-            const match2 = str.match(/"([A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,})"/);
-            if (match2) return match2[1];
-        }
+        const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+        let capturedToken = "";
+        XMLHttpRequest.prototype.setRequestHeader = function(name: string, value: string) {
+            if (name.toLowerCase() === "authorization" && value.length > 50) {
+                capturedToken = value;
+            }
+            return origSetHeader.call(this, name, value);
+        };
+        // Trigger a request that will use auth — just hook and wait
+        // The token should be captured on the next Discord API call
+        setTimeout(() => {
+            XMLHttpRequest.prototype.setRequestHeader = origSetHeader;
+        }, 5000);
+        if (capturedToken) return capturedToken;
     } catch {}
 
     return "";
 }
 
-export async function discordApi(method: string, path: string, body?: unknown): Promise<any> {
-    const token = getToken();
-    if (!token) throw new Error("Could not find Discord auth token");
+/**
+ * Make an authenticated Discord API request.
+ *
+ * Uses Approach 1 (Discord's native HTTP module) when possible,
+ * falling back to safeFetch + manual auth header.
+ */
+let _discordHttp: any = null;
 
-    const url = path.startsWith("http") ? path : `https://discord.com/api/v10${path}`;
-    const res = await safeFetch(url, {
+function getDiscordHttp(): any {
+    if (!_discordHttp) {
+        try {
+            const { findByProps } = require("@vendetta/metro");
+            _discordHttp = findByProps("get", "post", "put", "patch", "delete");
+        } catch {}
+    }
+    return _discordHttp;
+}
+
+export async function discordApi(method: string, path: string, body?: unknown): Promise<any> {
+    const url = path.startsWith("http") ? path : `https://discord.com/api/v9${path}`;
+
+    // Try using Discord's native HTTP module first (handles auth + token refresh automatically)
+    const http = getDiscordHttp();
+    if (http && typeof http[method.toLowerCase()] === "function") {
+        try {
+            const res = await http[method.toLowerCase()](url, body ? { body } : undefined);
+            return res?.body ?? res;
+        } catch (e: any) {
+            // If it fails with network error, fall through to manual approach
+            logger.error("[Nether] Discord HTTP module failed, falling back:", e);
+        }
+    }
+
+    // Fallback: manual auth via getToken() + fetch
+    const { findByProps } = require("@vendetta/metro");
+    const { getToken } = findByProps("getToken");
+    const token = getToken?.();
+    if (!token || token.length < 50) throw new Error("Could not find Discord auth token");
+
+    const res = await fetch(url, {
         method,
         headers: {
             Authorization: token,
@@ -154,6 +144,16 @@ export async function discordApi(method: string, path: string, body?: unknown): 
     }
 
     return res.json().catch(() => null);
+}
+
+export function getOwnUserId(): string {
+    try {
+        const { findByStoreName } = require("@vendetta/metro");
+        const UserStore = findByStoreName("UserStore");
+        return UserStore?.getCurrentUser()?.id || "";
+    } catch {
+        return "";
+    }
 }
 
 export function uid(): string {

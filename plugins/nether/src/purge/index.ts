@@ -53,13 +53,23 @@ export function initPurge(): () => void {
                 try {
                     showToast(`🔄 Fetching ${count} messages...`);
 
-                    const me = await discordApi("GET", "/users/@me");
-                    if (!me?.id) { showToast("❌ Could not identify you"); return; }
+                    // Get user identity via UserStore instead of API call when possible
+                    let myId = "";
+                    try {
+                        const { findByStoreName } = require("@vendetta/metro");
+                        const UserStore = findByStoreName("UserStore");
+                        myId = UserStore?.getCurrentUser()?.id || "";
+                    } catch {}
+                    if (!myId) {
+                        const me = await discordApi("GET", "/users/@me");
+                        myId = me?.id || "";
+                    }
+                    if (!myId) { showToast("❌ Could not identify you"); return; }
 
                     const msgs = await discordApi("GET", `/channels/${channelId}/messages?limit=${count}`);
                     if (!Array.isArray(msgs)) { showToast("❌ Failed to fetch messages"); return; }
 
-                    let ids = msgs.filter(m => m?.author?.id === me.id).map(m => m.id);
+                    let ids = msgs.filter(m => m?.author?.id === myId).map(m => m.id);
 
                     if (targetUser) {
                         ids = ids.filter(id => {

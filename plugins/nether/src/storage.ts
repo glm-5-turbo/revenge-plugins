@@ -18,6 +18,9 @@ const defaults = {
 
     // Auto-react — works via API (if token found)
     autoReactEnabled: false,
+    autoReactEmoji: "✅",
+    autoReactChannels: [],
+    autoReactUsers: [],
 
     // Chat Tweaks — works via FluxDispatcher patching
     ghostPings: true,

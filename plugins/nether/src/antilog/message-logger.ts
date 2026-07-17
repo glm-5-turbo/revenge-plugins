@@ -17,9 +17,6 @@ interface CachedMessage {
 const MAX_PER_CHANNEL = 500;
 const cache: Record<string, CachedMessage[]> = {};
 
-// Track which messages we've marked as edited to avoid double-marking
-const editedMarked = new Set<string>();
-
 function addMessage(msg: CachedMessage): void {
     if (!cache[msg.channelId]) cache[msg.channelId] = [];
     const channelCache = cache[msg.channelId];
@@ -75,8 +72,14 @@ export function initMessageLogger(): () => void {
         }
     });
 
-    // Hook MESSAGE_UPDATE to detect edits and mark them in the UI
-    const unpatchUpdate = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
+    // Hook MESSAGE_UPDATE to detect edits and show a toast
+    // Note: We use patcher.after (not before) because Discord's message store
+    // processes MESSAGE_UPDATE before our patch. The [edited] prefix injection
+    // into action.message.content only works if Discord's message rendering
+    // reads content from the action rather than the store. On Revenge Android
+    // it typically reads from the store, so we show the toast and trust the
+    // native "[Edited]" indicator Discord already adds in the UI.
+    const unpatchUpdate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
 
@@ -92,13 +95,6 @@ export function initMessageLogger(): () => void {
                     `✏️ ${cached.authorName} edited: "${cached.content.slice(0, 50)}" → "${newContent.slice(0, 50)}"`
                 );
 
-                // Inject a visible [edited] tag into the message content
-                // so it's obvious in the chat UI
-                if (!editedMarked.has(msgId)) {
-                    editedMarked.add(msgId);
-                    action.message.content = `[edited] ${newContent}`;
-                }
-
                 // Update cache
                 addMessage({
                     ...cached,
@@ -113,7 +109,6 @@ export function initMessageLogger(): () => void {
         unpatchCreate();
         unpatchDelete();
         unpatchUpdate();
-        editedMarked.clear();
         for (const key of Object.keys(cache)) delete cache[key];
         logger.log("[Nether] Message logger unloaded.");
     };

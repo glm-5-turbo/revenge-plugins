@@ -1,28 +1,13 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
-import { discordApi } from "../utils";
+import { discordApi, getOwnUserId } from "../utils";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
 
 let ownUserId = "";
 let afkActive = false;
 let afkTimeout: ReturnType<typeof setTimeout> | null = null;
-
-async function getOwnUserId(): Promise<string> {
-    if (ownUserId) return ownUserId;
-    try {
-        const { findByProps } = require("@vendetta/metro");
-        const UserStore = findByProps("getCurrentUser");
-        ownUserId = UserStore?.getCurrentUser()?.id || "";
-    } catch {
-        try {
-            const me = await discordApi("GET", "/users/@me");
-            ownUserId = me?.id || "";
-        } catch {}
-    }
-    return ownUserId;
-}
 
 function isMentioned(content: string, userId: string): boolean {
     return content.includes(`<@${userId}>`) || content.includes(`<@!${userId}>`);
@@ -39,8 +24,8 @@ export function initAFK(): () => void {
         const m = action.message;
         if (m.author?.bot) return;
 
-        const userId = await getOwnUserId();
-        if (!userId) return;
+        if (!ownUserId) ownUserId = getOwnUserId();
+        if (!ownUserId) return;
 
         if (m.author.id === userId) {
             afkActive = false;

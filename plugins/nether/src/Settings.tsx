@@ -113,8 +113,15 @@ export default function SettingsPanel() {
                             onChange={(v: string) => { storage.afkDelay = parseInt(v) || 3000; }}
                         />
                     </FormSection>
-                    <FormSection title="Other">
-                        <FormRow label="Auto-React (coming soon — needs emoji config UI)" />
+                    <FormSection title="Auto-React">
+                        <S label="Enable Auto-React" value={!!storage.autoReactEnabled} onValueChange={(v) => { storage.autoReactEnabled = v; }} />
+                        <FormDivider />
+                        <FormInput
+                            title="Emoji (Unicode)"
+                            value={String(storage.autoReactEmoji)}
+                            onChange={(v: string) => { storage.autoReactEmoji = v; }}
+                        />
+                        <FormRow label="Leave user/channel filters empty to react everywhere" />
                     </FormSection>
                 </View>
             )}

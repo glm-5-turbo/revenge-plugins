@@ -1,15 +1,16 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { storage } from "../storage";
+import { getOwnUserId } from "../utils";
 import { logger } from "@vendetta";
 
+/**
+ * Bot filter — suppresses bot messages from the chat view when enabled.
+ * Uses patcher.before on FluxDispatcher.dispatch to swallow
+ * MESSAGE_CREATE events from bot users before they render.
+ */
 export function initFilters(): () => void {
-    let ownUserId = "";
-    try {
-        const { findByProps } = require("@vendetta/metro");
-        const UserStore = findByProps("getCurrentUser");
-        ownUserId = UserStore?.getCurrentUser()?.id || "";
-    } catch { /* empty */ }
+    const ownUserId = getOwnUserId();
 
     const unpatch = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
@@ -26,9 +27,9 @@ export function initFilters(): () => void {
         }
     });
 
-    logger.log("[Nether] Custom filters initialized.");
+    logger.log("[Nether] Bot filter initialized.");
     return () => {
         unpatch();
-        logger.log("[Nether] Custom filters unloaded.");
+        logger.log("[Nether] Bot filter unloaded.");
     };
 }
