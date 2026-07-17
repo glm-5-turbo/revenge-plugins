@@ -7,11 +7,25 @@ import { logger } from "@vendetta";
 
 let ownUserId = "";
 
+// Track when we last sent a message in each channel
+// channel_id -> timestamp of our last MESSAGE_CREATE
+const lastOwnActivity: Record<string, number> = {};
+
 export function initAutoReact(): () => void {
     const UserStore = findByStoreName("UserStore") as any;
     ownUserId = UserStore?.getCurrentUser()?.id || "";
 
-    const unpatch = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
+    // Listen for our own MESSAGE_CREATE to track activity
+    const unTrack = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
+        const action = args[0];
+        if (action?.type !== "MESSAGE_CREATE" || !action.message) return;
+        const m = action.message;
+        if (m.author?.id !== ownUserId) return;
+        lastOwnActivity[m.channel_id] = Date.now();
+    });
+
+    // Main auto-react handler
+    const unReact = patcher.after("dispatch", FluxDispatcher, async (args: any[]) => {
         const action = args[0];
         if (!storage.autoReactEnabled) return;
         if (action?.type !== "MESSAGE_CREATE" || !action.message) return;
@@ -20,28 +34,42 @@ export function initAutoReact(): () => void {
         // Don't react to own messages or bots
         if (m.author?.id === ownUserId || m.author?.bot) return;
 
-        // Only react if the message is in a tracked channel (or all channels if none specified)
-        const trackedChannels: string[] = storage.autoReactChannels || [];
-        if (trackedChannels.length > 0 && !trackedChannels.includes(m.channel_id)) return;
+        const channelId = m.channel_id;
+        const guildId = m.guild_id;
 
-        // Only react if the message is from a tracked user (or all users if none specified)
-        const trackedUsers: string[] = storage.autoReactUsers || [];
-        if (trackedUsers.length > 0 && !trackedUsers.includes(m.author.id)) return;
-
+        const isDM = !guildId;
         const emoji = storage.autoReactEmoji || "✅";
 
-        try {
-            const encodedEmoji = encodeURIComponent(emoji);
-            await discordApi("PUT", `/channels/${m.channel_id}/messages/${m.id}/reactions/${encodedEmoji}/@me`);
-        } catch (e: any) {
-            // Silently fail — reaction failures are common (no permission, etc.)
-            logger.error("[Nether] Auto-react failed:", e.message);
+        if (isDM) {
+            // Always react in DMs — they're private, low stakes
+            await doReact(channelId, m.id, emoji);
+            return;
         }
+
+        // In server channels: only react if we've been active recently
+        const lastActive = lastOwnActivity[channelId] || 0;
+        const isRecent = (Date.now() - lastActive) < 5 * 60 * 1000; // 5 minutes
+
+        if (isRecent) {
+            await doReact(channelId, m.id, emoji);
+        }
+        // Otherwise skip — user is passive/lurking
     });
 
     logger.log("[Nether] Auto-react initialized.");
     return () => {
-        unpatch();
+        unTrack();
+        unReact();
+        for (const key of Object.keys(lastOwnActivity)) delete lastOwnActivity[key];
         logger.log("[Nether] Auto-react unloaded.");
     };
+}
+
+async function doReact(channelId: string, messageId: string, emoji: string): Promise<void> {
+    try {
+        const encodedEmoji = encodeURIComponent(emoji);
+        await discordApi("PUT", `/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`);
+    } catch (e: any) {
+        logger.error("[Nether] Auto-react failed:", e.message);
+    }
 }

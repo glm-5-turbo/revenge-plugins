@@ -121,7 +121,8 @@ export default function SettingsPanel() {
                             value={String(storage.autoReactEmoji)}
                             onChange={(v: string) => { storage.autoReactEmoji = v; }}
                         />
-                        <FormRow label="Leave user/channel filters empty to react everywhere" />
+                        <FormRow label="↗️ Reacts in DMs always" />
+                        <FormRow label="💬 Reacts in servers only if you've sent a message there recently" />
                     </FormSection>
                 </View>
             )}
