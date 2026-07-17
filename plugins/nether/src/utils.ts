@@ -37,6 +37,18 @@ export class RateLimiter {
         }
         this.running = false;
     }
+
+    /** Wait for all queued tasks to finish */
+    async flush(): Promise<void> {
+        if (!this.running && this.queue.length === 0) return;
+        return new Promise((resolve) => {
+            const check = () => {
+                if (!this.running && this.queue.length === 0) resolve();
+                else setTimeout(check, 100);
+            };
+            check();
+        });
+    }
 }
 
 export function sleep(ms: number): Promise<void> {

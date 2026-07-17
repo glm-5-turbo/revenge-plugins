@@ -54,7 +54,7 @@ export function initPurge(): () => void {
                 try {
                     showToast(`🔄 Fetching ${count} messages...`);
 
-                    // Get user identity via UserStore instead of API call when possible
+                    // Get our user ID
                     let myId = "";
                     try {
                         const UserStore = findByStoreName("UserStore") as any;
@@ -69,27 +69,38 @@ export function initPurge(): () => void {
                     const msgs = await discordApi("GET", `/channels/${channelId}/messages?limit=${count}`);
                     if (!Array.isArray(msgs)) { showToast("❌ Failed to fetch messages"); return; }
 
-                    let ids = msgs.filter(m => m?.author?.id === myId).map(m => m.id);
+                    // Filter to our messages, optionally by mentioned user
+                    let toDelete = msgs.filter(m => m?.author?.id === myId);
 
                     if (targetUser) {
-                        ids = ids.filter(id => {
-                            const msg = msgs.find(m => m.id === id);
-                            return msg?.mentions?.some((u: any) => u.id === targetUser) ||
-                                   msg?.content?.includes(`<@${targetUser}>`);
-                        });
+                        toDelete = toDelete.filter(m =>
+                            m?.mentions?.some((u: any) => u.id === targetUser) ||
+                            m?.content?.includes(`<@${targetUser}>`)
+                        );
                     }
 
-                    if (ids.length === 0) { showToast("✅ Nothing to delete"); return; }
+                    if (toDelete.length === 0) { showToast("✅ Nothing to delete"); return; }
 
-                    // Bulk delete in batches of 100
-                    for (let i = 0; i < ids.length; i += 100) {
-                        const batch = ids.slice(i, i + 100);
+                    showToast(`🗑️ Deleting ${toDelete.length} messages...`);
+
+                    // Delete each message individually — bulk-delete requires
+                    // Manage Messages permission which user tokens don't have
+                    let deleted = 0;
+                    for (const msg of toDelete) {
                         await purgeLimiter.add(async () => {
-                            await discordApi("POST", `/channels/${channelId}/messages/bulk-delete`, { messages: batch });
+                            try {
+                                await discordApi("DELETE", `/channels/${channelId}/messages/${msg.id}`);
+                                deleted++;
+                            } catch (e: any) {
+                                logger.error("[Nether] Failed to delete message:", e.message);
+                            }
                         });
                     }
 
-                    showToast(`✅ Deleted ${ids.length} messages`);
+                    // Wait for all queued deletes to finish
+                    await purgeLimiter.flush();
+
+                    showToast(`✅ Deleted ${deleted}/${toDelete.length} messages`);
                 } catch (e: any) {
                     showToast(`❌ ${e.message}`);
                     logger.error("[Nether] Purge error:", e);
