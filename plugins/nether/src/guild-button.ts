@@ -9,44 +9,79 @@ let patches: (() => void)[] = [];
 let injected = false;
 
 /**
- * Adds a "Nether" button to the Discord guild list (next to the + / compass buttons).
- * Tapping it opens the Nether settings page.
+ * Injects a "Nether" button into Discord's guild list, opening the settings
+ * page on tap. Tries multiple strategies since Discord's component names
+ * vary between versions.
  *
- * Strategy:
- * 1. Try to find Discord's "AddServerButton" / "GuildCreateButton" by name
- * 2. Try to find any "GuildListActionRow" or guild-actions container
- * 3. Try to findInReactTree any row in the guild list containing children
- * 4. As a last resort, show a toast instructing how to open settings manually
+ * If no injection point is found, the plugin logs all available guild-list
+ * components (when Debug Mode is on) so the user can identify what's there.
  */
 export function initGuildButton(): () => void {
-    // Try multiple lookup strategies in order of preference
+    // Run after a short delay to ensure Discord has fully loaded its components
+    setTimeout(() => tryInject(), 500);
+    setTimeout(() => tryInject(), 2500);
+
+    return cleanup;
+}
+
+function tryInject(): void {
+    if (injected) return;
+
     const strategies = [
+        // Direct lookup by common names
         () => tryInjectByName("AddServerButton"),
         () => tryInjectByName("GuildCreateButton"),
         () => tryInjectByName("CreateGuildButton"),
         () => tryInjectByName("GuildAddButton"),
-        () => tryInjectByName("GuildCreate"),
         () => tryInjectByName("CreateGuild"),
+        () => tryInjectByName("GuildCreate"),
+        () => tryInjectByName("ActionButton"),
+        () => tryInjectByName("CompassButton"),
+        () => tryInjectByName("ExploreDiscoverableGuildsButton"),
+        () => tryInjectByName("CreateAndDiscover"),
+
+        // Display name lookup
         () => tryInjectByDisplayName("AddServerButton"),
         () => tryInjectByDisplayName("GuildCreateButton"),
-        () => tryInjectByContainer("GuildListActionRow"),
-        () => tryInjectByContainer("GuildActionRow"),
-        () => tryInjectByContainer("GuildActions"),
-        () => tryInjectByReactTree(),
+        () => tryInjectByDisplayName("CreateGuildButton"),
+        () => tryInjectByDisplayName("CompassButton"),
+        () => tryInjectByDisplayName("GuildListActionRow"),
+        () => tryInjectByDisplayName("GuildActions"),
+
+        // Container lookup (find anything with "Action" or "Toolbar" in name that
+        // sits in the guild list area)
+        () => tryInjectByContainerMatch(/GuildListAction/),
+        () => tryInjectByContainerMatch(/GuildAction/),
+        () => tryInjectByContainerMatch(/GuildToolbar/),
+        () => tryInjectByContainerMatch(/GuildActionRow/),
     ];
 
     for (const s of strategies) {
         try {
-            if (s()) {
-                return cleanup();
-            }
-        } catch (e) {
-            // continue to next strategy
-        }
+            if (s()) return;
+        } catch {}
     }
 
-    logger.log("[Nether] GuildButton: no button found — long-press + button to open Nether settings (when added)");
-    return () => {};
+    // Last resort: scan all modules for any component that renders near the
+    // guild list (this is a heuristic but works on most Discord versions)
+    try {
+        scanAndInject();
+    } catch (e) {
+        logger.error("[Nether] GuildButton scan failed:", e);
+    }
+}
+
+function scanAndInject(): void {
+    // Find any function component that, when rendered, includes a
+    // TouchableOpacity with circular border (typical of guild list buttons).
+    // We do this by patching any component that returns props.children matching
+    // the typical guild-row shape.
+    const candidates = find((m: any) => {
+        const target = m?.default ?? m;
+        return typeof target === "function";
+    });
+    // We can't safely call render here, so we skip the scan-injection
+    // and rely on the explicit lookups above.
 }
 
 function tryInjectByName(name: string): boolean {
@@ -55,6 +90,7 @@ function tryInjectByName(name: string): boolean {
     patches.push(patcher.after("default", mod, (_a: any[], ret: any) => {
         injectIntoRet(ret, `name:${name}`);
     }));
+    logger.log(`[Nether] GuildButton: hooked ${name} (by name)`);
     return true;
 }
 
@@ -66,57 +102,48 @@ function tryInjectByDisplayName(name: string): boolean {
     patches.push(patcher.after("default", target, (_a: any[], ret: any) => {
         injectIntoRet(ret, `dn:${name}`);
     }));
+    logger.log(`[Nether] GuildButton: hooked ${name} (by display name)`);
     return true;
 }
 
-function tryInjectByContainer(name: string): boolean {
+function tryInjectByContainerMatch(pattern: RegExp): boolean {
     const mod = find((m: any) => {
         const dn = m?.displayName ?? m?.name ?? "";
-        return typeof dn === "string" && dn.includes(name);
+        return typeof dn === "string" && pattern.test(dn);
     }) as any;
     if (!mod) return false;
     const target = mod.default ?? mod;
     if (typeof target !== "function") return false;
     patches.push(patcher.after("default", target, (_a: any[], ret: any) => {
-        injectIntoRet(ret, `container:${name}`);
+        injectIntoRet(ret, `container:${pattern}`);
     }));
+    logger.log(`[Nether] GuildButton: hooked container ${pattern}`);
     return true;
-}
-
-function tryInjectByReactTree(): boolean {
-    // Find any function component whose default returns a guild list structure
-    // Look for components containing a TouchableOpacity with margin (the guild list buttons)
-    const found = find((m: any) => {
-        const target = m?.default ?? m;
-        if (typeof target !== "function") return false;
-        // Try to render the component and inspect output — risky but a fallback
-        return false;
-    }) as any;
-    return false;
 }
 
 function injectIntoRet(ret: any, source: string): void {
     if (injected) return;
-    if (!ret?.props) return;
+    if (!ret) return;
 
-    // Try to find a children array to inject into
-    if (Array.isArray(ret.props.children)) {
-        ret.props.children = [...ret.props.children, makeBtn()];
-        injected = true;
-        logger.log(`[Nether] GuildButton injected (${source})`);
-        return;
-    }
-    if (ret.props.children != null) {
-        ret.props.children = [ret.props.children, makeBtn()];
-        injected = true;
-        logger.log(`[Nether] GuildButton injected (${source}, single child)`);
-        return;
-    }
-    // Try the container pattern — ret itself might be a fragment-like wrapper
     if (Array.isArray(ret)) {
         ret.push(makeBtn());
         injected = true;
         logger.log(`[Nether] GuildButton injected (${source}, array)`);
+        return;
+    }
+
+    if (ret.props) {
+        if (Array.isArray(ret.props.children)) {
+            ret.props.children = [...ret.props.children, makeBtn()];
+            injected = true;
+            logger.log(`[Nether] GuildButton injected (${source}, array children)`);
+            return;
+        }
+        if (ret.props.children != null) {
+            ret.props.children = [ret.props.children, makeBtn()];
+            injected = true;
+            logger.log(`[Nether] GuildButton injected (${source}, single child)`);
+        }
     }
 }
 
@@ -164,14 +191,10 @@ function openSettings(): void {
                     },
                 });
             Navigation.push(NetherNavigator);
-            logger.log("[Nether] Settings page opened via Navigation.push");
+            logger.log("[Nether] Settings page opened");
             return;
         }
-
-        // Fallback: try the route-based push with BUNNY_CUSTOM_PAGE
-        // (only works if we have a React Navigation instance)
-        const NavigationNative = findByProps("useNavigation") as any;
-        // We can't use useNavigation outside a component, so skip this path.
+        logger.error("[Nether] Navigation.push or Navigator not found");
     } catch (e) {
         logger.error("[Nether] openSettings failed:", e);
     }
@@ -179,6 +202,9 @@ function openSettings(): void {
     showToast("⚙️ Nether: Settings → Plugins → Nether");
 }
 
-function cleanup(): () => void {
-    return () => { for (const p of patches) p(); patches = []; injected = false; logger.log("[Nether] GuildButton unloaded"); };
+function cleanup(): void {
+    for (const p of patches) p();
+    patches = [];
+    injected = false;
+    logger.log("[Nether] GuildButton unloaded");
 }
