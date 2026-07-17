@@ -146,6 +146,13 @@ export function initMessageLogger(): () => void {
             const msgId = action.message.id;
             const channelId = action.message.channel_id;
             const key = `${channelId}:${msgId}`;
+
+            // Handle __vml_deleted marker (from anti-purge-log conversion)
+            if (action.message.__vml_deleted) {
+                confirmedDeletes.add(key);
+                return;
+            }
+
             const cached = getCached(channelId, msgId);
             const newContent = action.message.content;
             if (cached && newContent && newContent !== cached.content) {
