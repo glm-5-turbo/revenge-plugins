@@ -12,6 +12,7 @@ import { initGhostPings } from "./tweaks/ghost-pings";
 import { initSpamGuard } from "./tweaks/spam-guard";
 import { initFilters } from "./tweaks/filters";
 import { initDebug } from "./debug";
+import { initGuildButton } from "./guild-button";
 
 let unloads: (() => void)[] = [];
 
@@ -36,6 +37,9 @@ export default {
         unloads.push(initGhostPings());
         unloads.push(initSpamGuard());
         unloads.push(initFilters());
+
+        // Guild sidebar button
+        unloads.push(initGuildButton());
 
         // Debug
         unloads.push(initDebug());
