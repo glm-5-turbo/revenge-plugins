@@ -1,13 +1,25 @@
 import { storage } from "@vendetta/plugin";
 
 const defaults = {
-    // Anti-Log — all work via FluxDispatcher patching
+    // Anti-Log — works via FluxDispatcher patching
     antiTyping: false,
     antiRead: false,
     antiPurgeLog: false,
     messageLogger: false,
 
-    // Chat Tweaks — all work via FluxDispatcher patching
+    // Purge — works via API (if token found)
+    purgeDelay: 800,
+    purgeConfirm: true,
+
+    // AFK — works via API (if token found)
+    afkEnabled: false,
+    afkMessage: "I'm currently AFK. I'll get back to you later.",
+    afkDelay: 3000,
+
+    // Auto-react — works via API (if token found)
+    autoReactEnabled: false,
+
+    // Chat Tweaks — works via FluxDispatcher patching
     ghostPings: true,
     spamGuardEnabled: false,
     spamGuardThreshold: 10,

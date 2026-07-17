@@ -4,6 +4,9 @@ import Settings from "./Settings";
 
 import { initAntiLog } from "./antilog";
 import { initMessageLogger } from "./antilog/message-logger";
+import { initPurge } from "./purge";
+import { initAFK } from "./automation/afk";
+import { initAutoReact } from "./automation/auto-react";
 import { initGhostPings } from "./tweaks/ghost-pings";
 import { initSpamGuard } from "./tweaks/spam-guard";
 import { initFilters } from "./tweaks/filters";
@@ -16,16 +19,23 @@ export default {
         logger.log("[Nether] Loading...");
         initStorage();
 
-        // Anti-Log — blocks Discord dispatches so typing/read/purge aren't broadcast
+        // Anti-Log
         unloads.push(initAntiLog());
         unloads.push(initMessageLogger());
 
-        // Chat Tweaks — ghost ping detection, spam suppression, message filtering
+        // Purge
+        unloads.push(initPurge());
+
+        // Automation
+        unloads.push(initAFK());
+        unloads.push(initAutoReact());
+
+        // Chat Tweaks
         unloads.push(initGhostPings());
         unloads.push(initSpamGuard());
         unloads.push(initFilters());
 
-        // Debug — logs all FluxDispatcher actions when enabled
+        // Debug
         unloads.push(initDebug());
 
         logger.log("[Nether] All modules loaded.");

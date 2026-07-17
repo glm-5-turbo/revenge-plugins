@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 import { useProxy } from "@vendetta/storage";
 import { storage } from "./storage";
 
-const { FormSection, FormRow, FormSwitch, FormDivider } = Forms;
+const { FormSection, FormRow, FormSwitch, FormInput, FormDivider } = Forms;
 const { ScrollView, TouchableOpacity, Text, View } = ReactNative;
 
-type Tab = "antillog" | "tweaks";
+type Tab = "antillog" | "purge" | "automation" | "tweaks";
 
 function S({ label, value, onValueChange }: { label: string; value: boolean; onValueChange: (v: boolean) => void }) {
     return (
@@ -20,12 +20,22 @@ function S({ label, value, onValueChange }: { label: string; value: boolean; onV
 
 const tabs: { key: Tab; label: string }[] = [
     { key: "antillog", label: "Anti-Log" },
+    { key: "purge", label: "Purge" },
+    { key: "automation", label: "Auto" },
     { key: "tweaks", label: "Tweaks" },
 ];
 
 export default function SettingsPanel() {
     const [tab, setTab] = useState<Tab>("antillog");
     useProxy(storage);
+
+    // Wire AFK toggle
+    useEffect(() => {
+        try {
+            const toggle = (globalThis as any).__nether_setAFK;
+            if (toggle) toggle(storage.afkEnabled);
+        } catch {}
+    }, [storage.afkEnabled]);
 
     return (
         <ScrollView>
@@ -63,6 +73,48 @@ export default function SettingsPanel() {
                         <S label="Anti-Purge Log" value={!!storage.antiPurgeLog} onValueChange={(v) => { storage.antiPurgeLog = v; }} />
                         <FormDivider />
                         <S label="Message Logger" value={!!storage.messageLogger} onValueChange={(v) => { storage.messageLogger = v; }} />
+                    </FormSection>
+                </View>
+            )}
+
+            {tab === "purge" && (
+                <View>
+                    <FormSection title="Purge Settings">
+                        <FormInput
+                            title="Rate Limit Delay (ms)"
+                            value={String(storage.purgeDelay)}
+                            onChange={(v: string) => { storage.purgeDelay = parseInt(v) || 800; }}
+                        />
+                        <FormDivider />
+                        <S label="Confirm Before Purge" value={!!storage.purgeConfirm} onValueChange={(v) => { storage.purgeConfirm = v; }} />
+                    </FormSection>
+                    <FormSection title="Usage">
+                        <FormRow label="/purge 5 — deletes your last 5 messages" />
+                        <FormDivider />
+                        <FormRow label="/purge 10 user: @someone — your msgs mentioning them" />
+                    </FormSection>
+                </View>
+            )}
+
+            {tab === "automation" && (
+                <View>
+                    <FormSection title="AFK Mode">
+                        <S label="Enable AFK" value={!!storage.afkEnabled} onValueChange={(v) => { storage.afkEnabled = v; }} />
+                        <FormDivider />
+                        <FormInput
+                            title="AFK Message"
+                            value={String(storage.afkMessage)}
+                            onChange={(v: string) => { storage.afkMessage = v; }}
+                        />
+                        <FormDivider />
+                        <FormInput
+                            title="Reply Delay (ms)"
+                            value={String(storage.afkDelay)}
+                            onChange={(v: string) => { storage.afkDelay = parseInt(v) || 3000; }}
+                        />
+                    </FormSection>
+                    <FormSection title="Other">
+                        <FormRow label="Auto-React (coming soon — needs emoji config UI)" />
                     </FormSection>
                 </View>
             )}
