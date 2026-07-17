@@ -1,5 +1,6 @@
 import { patcher } from "@vendetta";
 import { FluxDispatcher } from "@vendetta/metro/common";
+import { findByStoreName } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { storage } from "../storage";
 import { logger } from "@vendetta";
@@ -17,6 +18,16 @@ interface CachedMessage {
 const MAX_PER_CHANNEL = 500;
 const cache: Record<string, CachedMessage[]> = {};
 
+// Track messages we've already seen a MESSAGE_DELETE for — don't alert again
+const confirmedDeletes = new Set<string>();
+
+// Track messages we've shown a toast for (avoid duplicates)
+const notifiedMessages = new Set<string>();
+
+// Polling interval for silent delete detection
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+const POLL_MS = 8_000; // check every 8 seconds
+
 function addMessage(msg: CachedMessage): void {
     if (!cache[msg.channelId]) cache[msg.channelId] = [];
     const channelCache = cache[msg.channelId];
@@ -29,6 +40,66 @@ function addMessage(msg: CachedMessage): void {
 
 function getCached(channelId: string, messageId: string): CachedMessage | undefined {
     return cache[channelId]?.find((m) => m.id === messageId);
+}
+
+function removeFromCache(channelId: string, messageId: string): void {
+    if (!cache[channelId]) return;
+    cache[channelId] = cache[channelId].filter((m) => m.id !== messageId);
+    if (cache[channelId].length === 0) delete cache[channelId];
+}
+
+/**
+ * Periodic poll to detect "silent deletes" — messages that vanished
+ * from the UI but never dispatched MESSAGE_DELETE (likely because
+ * another plugin suppressed it via patcher.before).
+ *
+ * Compares our cache against Discord's MessageStore to find gaps.
+ */
+function startSilentDeleteDetector(): void {
+    if (pollInterval) return;
+
+    pollInterval = setInterval(() => {
+        if (!storage.messageLogger) return;
+
+        try {
+            const MessageStore = findByStoreName("MessageStore") as any;
+            if (!MessageStore) return;
+
+            for (const [channelId, msgs] of Object.entries(cache)) {
+                const cachedMsgs = msgs as CachedMessage[];
+                const channelMessages = MessageStore.getMessages(channelId);
+                if (!channelMessages) continue;
+
+                for (const cached of cachedMsgs) {
+                    const key = `${channelId}:${cached.id}`;
+
+                    // Skip messages we already handled
+                    if (confirmedDeletes.has(key)) continue;
+                    if (notifiedMessages.has(key)) continue;
+
+                    // Check if the message still exists in the store
+                    const stillExists = channelMessages.get(cached.id) != null;
+                    if (!stillExists) {
+                        // Message vanished without a MESSAGE_DELETE event!
+                        // This means someone's anti-log suppressed it
+                        notifiedMessages.add(key);
+                        showToast(
+                            `🕵️ Silent delete (anti-log blocked): "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}" — ${cached.authorName}`
+                        );
+                    }
+                }
+            }
+        } catch (e) {
+            // Polling errors are non-critical — skip this cycle
+        }
+    }, POLL_MS);
+}
+
+function stopSilentDeleteDetector(): void {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
 }
 
 export function initMessageLogger(): () => void {
@@ -58,27 +129,32 @@ export function initMessageLogger(): () => void {
         if (action?.type === "MESSAGE_DELETE") {
             const msgId = action.id;
             const channelId = action.channel_id;
+            const key = `${channelId}:${msgId}`;
+
+            // Mark as confirmed delete so silent detector skips it
+            confirmedDeletes.add(key);
+
             const cached = getCached(channelId, msgId);
             if (cached) {
+                // Show a nice delete toast — highlighted to show it was caught
                 showToast(
                     `🗑️ Deleted: "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}" — ${cached.authorName}`
                 );
+                removeFromCache(channelId, msgId);
             }
         }
 
         if (action?.type === "MESSAGE_DELETE_BULK") {
             const ids: string[] = action.ids || [];
-            showToast(`🗑️ ${ids.length} messages bulk deleted in this channel.`);
+            const channelId = action.channel_id || "";
+            for (const id of ids) {
+                confirmedDeletes.add(`${channelId}:${id}`);
+            }
+            showToast(`🗑️ ${ids.length} messages bulk deleted`);
         }
     });
 
-    // Hook MESSAGE_UPDATE to detect edits and show a toast
-    // Note: We use patcher.after (not before) because Discord's message store
-    // processes MESSAGE_UPDATE before our patch. The [edited] prefix injection
-    // into action.message.content only works if Discord's message rendering
-    // reads content from the action rather than the store. On Revenge Android
-    // it typically reads from the store, so we show the toast and trust the
-    // native "[Edited]" indicator Discord already adds in the UI.
+    // Hook MESSAGE_UPDATE to detect edits
     const unpatchUpdate = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.messageLogger) return;
@@ -90,7 +166,7 @@ export function initMessageLogger(): () => void {
             const newContent = action.message.content;
 
             if (cached && newContent && newContent !== cached.content) {
-                // Show toast with old → new
+                // Show formatted edit toast
                 showToast(
                     `✏️ ${cached.authorName} edited: "${cached.content.slice(0, 50)}" → "${newContent.slice(0, 50)}"`
                 );
@@ -104,12 +180,18 @@ export function initMessageLogger(): () => void {
         }
     });
 
+    // Start periodic check for silent deletes (anti-anti-log)
+    startSilentDeleteDetector();
+
     logger.log("[Nether] Message logger initialized.");
     return () => {
         unpatchCreate();
         unpatchDelete();
         unpatchUpdate();
+        stopSilentDeleteDetector();
         for (const key of Object.keys(cache)) delete cache[key];
+        confirmedDeletes.clear();
+        notifiedMessages.clear();
         logger.log("[Nether] Message logger unloaded.");
     };
 }

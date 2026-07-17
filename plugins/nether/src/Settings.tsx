@@ -121,8 +121,7 @@ export default function SettingsPanel() {
                             value={String(storage.autoReactEmoji)}
                             onChange={(v: string) => { storage.autoReactEmoji = v; }}
                         />
-                        <FormRow label="↗️ Reacts in DMs always" />
-                        <FormRow label="💬 Reacts in servers only if you've sent a message there recently" />
+                        <FormRow label="💬 DMs only, within 1 min of your last message" />
                     </FormSection>
                 </View>
             )}
