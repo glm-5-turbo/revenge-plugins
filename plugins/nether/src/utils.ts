@@ -51,18 +51,56 @@ export function sleep(ms: number): Promise<void> {
 
 // Extract Discord token — tries known module locations
 export function getToken(): string {
+    // 1) RestClient.getToken (most common in Discord)
     try {
         const rest = findByProps("getToken");
-        if (rest?.getToken?.()) return rest.getToken();
-    } catch {}
+        if (rest?.getToken?.()) {
+            const token = rest.getToken();
+            logger.log("[Nether] Token: found via findByProps(getToken)");
+            return token;
+        }
+    } catch { logger.warn("[Nether] Token: method 1 (getToken prop) failed"); }
+
+    // 2) HTTPClient.getToken
     try {
         const http = findByProps("getSuperProperties", "getToken");
-        if (http?.getToken?.()) return http.getToken();
-    } catch {}
+        if (http?.getToken?.()) {
+            const token = http.getToken();
+            logger.log("[Nether] Token: found via HTTPClient.getToken");
+            return token;
+        }
+    } catch { logger.warn("[Nether] Token: method 2 (HTTPClient.getToken) failed"); }
+
+    // 3) API layer _token
     try {
         const api = findByProps("API", "api");
-        if (api?.API?._token) return api.API._token;
-    } catch {}
+        if (api?.API?._token) {
+            logger.log("[Nether] Token: found via API._token");
+            return api.API._token;
+        }
+    } catch { logger.warn("[Nether] Token: method 3 (API._token) failed"); }
+
+    // 4) Http module (found in some Revenge builds)
+    try {
+        const httpMod = findByProps("Http", "HTTP");
+        if (httpMod?.Http?.getToken?.()) {
+            const token = httpMod.Http.getToken();
+            logger.log("[Nether] Token: found via Http.getToken");
+            return token;
+        }
+    } catch { logger.warn("[Nether] Token: method 4 (Http module) failed"); }
+
+    // 5) Socket / connection layer token
+    try {
+        const conn = findByProps("connect", "disconnect", "getToken");
+        if (conn?.getToken?.()) {
+            const token = conn.getToken();
+            logger.log("[Nether] Token: found via connection.getToken");
+            return token;
+        }
+    } catch { logger.warn("[Nether] Token: method 5 (connection token) failed"); }
+
+    logger.warn("[Nether] Token: all 5 extraction methods failed");
     return "";
 }
 

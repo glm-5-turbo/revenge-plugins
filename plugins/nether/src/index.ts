@@ -18,50 +18,52 @@ import { showCustomAlert } from "@vendetta/ui/alerts";
 
 let unloads: (() => void)[] = [];
 
-export function onLoad() {
-    logger.log("[Nether] Loading...");
-    initStorage();
+export default {
+    onLoad: () => {
+        logger.log("[Nether] Loading...");
+        initStorage();
 
-    // Server list button — tap to open settings
-    unloads.push(initServerButton(() => {
-        try {
-            showCustomAlert(Settings, {});
-        } catch (e) {
-            logger.error("[Nether] Settings open failed:", e);
-        }
-    }));
+        // Server list button — tap to open settings
+        unloads.push(initServerButton(() => {
+            try {
+                showCustomAlert(Settings, {});
+            } catch (e) {
+                logger.error("[Nether] Settings open failed:", e);
+            }
+        }));
 
-    // Anti-Log
-    unloads.push(initAntiLog());
-    unloads.push(initMessageLogger());
+        // Anti-Log
+        unloads.push(initAntiLog());
+        unloads.push(initMessageLogger());
 
-    // Purge
-    unloads.push(initPurge());
+        // Purge
+        unloads.push(initPurge());
 
-    // Automation
-    unloads.push(initAFK());
-    unloads.push(initScheduler());
-    unloads.push(initAutoReact());
-    unloads.push(initNotifications());
+        // Automation
+        unloads.push(initAFK());
+        unloads.push(initScheduler());
+        unloads.push(initAutoReact());
+        unloads.push(initNotifications());
 
-    // Chat Tweaks
-    unloads.push(initGhostPings());
-    unloads.push(initSpamGuard());
-    unloads.push(initFilters());
+        // Chat Tweaks
+        unloads.push(initGhostPings());
+        unloads.push(initSpamGuard());
+        unloads.push(initFilters());
 
-    // Debug / Flux action logger
-    unloads.push(initDebug());
+        // Debug / Flux action logger
+        unloads.push(initDebug());
 
-    logger.log("[Nether] All modules loaded.");
-}
+        logger.log("[Nether] All modules loaded.");
+    },
 
-export function onUnload() {
-    logger.log("[Nether] Unloading...");
-    unloads.forEach((fn) => {
-        try { fn(); } catch (e) { logger.error("[Nether] Unload error:", e); }
-    });
-    unloads = [];
-    logger.log("[Nether] Unloaded.");
-}
+    onUnload: () => {
+        logger.log("[Nether] Unloading...");
+        unloads.forEach((fn) => {
+            try { fn(); } catch (e) { logger.error("[Nether] Unload error:", e); }
+        });
+        unloads = [];
+        logger.log("[Nether] Unloaded.");
+    },
 
-export const settings = Settings;
+    settings: Settings,
+};

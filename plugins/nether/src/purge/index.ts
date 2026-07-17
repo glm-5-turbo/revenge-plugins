@@ -67,7 +67,7 @@ export function initPurge(): () => void {
         displayName: "Nether",
         description: "Nether plugin — purge, auto, tweaks",
         displayDescription: "Nether plugin — purge, auto, tweaks",
-        applicationId: "-1",
+        applicationId: "0",
         type: 1 as any,
         inputType: 1 as any,
         options: [
