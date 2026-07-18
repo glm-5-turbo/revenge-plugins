@@ -181,6 +181,8 @@ export default function SettingsPanel() {
                         <FormSection title="Usage">
                             <FormRow label="/purge 5 — deletes your last 5 messages" />
                             <FormDivider />
+                            <FormRow label="/purge 250 — deletes your last 250" />
+                            <FormDivider />
                             <FormRow label="/purge 10 user: @someone — your msgs mentioning them" />
                         </FormSection>
                     </View>

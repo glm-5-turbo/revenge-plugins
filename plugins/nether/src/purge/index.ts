@@ -46,7 +46,7 @@ export function initPurge(): () => void {
             let targetUser: string | null = null;
 
             for (const arg of args || []) {
-                if (arg?.name === "count") count = Math.min(Math.max(parseInt(arg.value) || 5, 1), 100);
+                if (arg?.name === "count") count = Math.max(parseInt(arg.value) || 5, 0);
                 if (arg?.name === "user") targetUser = arg.value;
             }
 
