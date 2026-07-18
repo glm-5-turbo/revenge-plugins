@@ -109,8 +109,10 @@ async function rescanAndClean(): Promise<void> {
         try {
             const msgs = MessageStore.getMessages?.(channelId);
             if (!msgs) continue;
-            // msgs is a MessageMap - iterate values
-            const values = typeof msgs.values === "function" ? Array.from(msgs.values()) : Object.values(msgs);
+            // msgs is a MessageMap (Map-like) on Discord Android
+            const values: any[] = typeof msgs.values === "function"
+                ? Array.from(msgs.values())
+                : (Array.isArray(msgs) ? msgs : Object.values(msgs).filter((v: any) => typeof v === "object" && v?.id));
             for (const m of values) {
                 if (!m?.id || m.author?.id !== ownUserId) continue;
                 if (!m.timestamp) continue;

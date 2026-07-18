@@ -18,9 +18,14 @@ import { logger } from "@vendetta";
  *   → Edits the message to dummy text via REST API
  *   → Dispatches a new MESSAGE_DELETE with the real ID
  *   → Other clients' loggers see the dummy content in their cache
+ *
+ * CRITICAL: Uses a Set-based reentrancy guard (_netherAntiPurgeIds) to prevent
+ * the infinite loop that would occur when our own FluxDispatcher.dispatch()
+ * call re-enters this same patcher.before handler.
  */
 
 let ownUserId = "";
+const handlingIds = new Set<string>();
 
 export function initAntiPurgeLog(): () => void {
     try {
@@ -35,6 +40,15 @@ export function initAntiPurgeLog(): () => void {
         if (action?.type === "MESSAGE_DELETE") {
             const channelId = action.channel_id;
             const msgId = action.id;
+            if (!channelId || !msgId) return;
+
+            // Reentrancy guard: if we're already handling this message ID,
+            // let this dispatch through — it's the one WE triggered after the edit.
+            const key = `${channelId}:${msgId}`;
+            if (handlingIds.has(key)) {
+                handlingIds.delete(key);
+                return;
+            }
 
             const MessageStore = findByStoreName("MessageStore") as any;
             const msgs = MessageStore?.getMessages(channelId);
@@ -53,6 +67,9 @@ export function initAntiPurgeLog(): () => void {
                     content: blockText,
                 });
 
+                // Mark this ID so the re-dispatched MESSAGE_DELETE is not intercepted
+                handlingIds.add(key);
+
                 // Now dispatch the real delete — content is already overwritten
                 FluxDispatcher.dispatch({
                     type: "MESSAGE_DELETE",
@@ -62,6 +79,7 @@ export function initAntiPurgeLog(): () => void {
             } catch (e: any) {
                 // Edit failed (too old, no permission) — just let delete go through
                 logger.error("[Nether] Anti-purge edit failed:", e.message);
+                handlingIds.add(key);
                 FluxDispatcher.dispatch({
                     type: "MESSAGE_DELETE",
                     id: msgId,
@@ -74,6 +92,7 @@ export function initAntiPurgeLog(): () => void {
     logger.log("[Nether] Anti-purge-log initialized.");
     return () => {
         unpatch();
+        handlingIds.clear();
         logger.log("[Nether] Anti-purge-log unloaded.");
     };
 }

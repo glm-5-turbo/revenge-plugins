@@ -245,6 +245,25 @@ export default function SettingsPanel() {
                             <S label="Ghost Pings" value={!!storage.ghostPings} onValueChange={(v) => { storage.ghostPings = v; }} />
                             <FormDivider />
                             <S label="Spam Guard" value={!!storage.spamGuardEnabled} onValueChange={(v) => { storage.spamGuardEnabled = v; }} />
+                            {storage.spamGuardEnabled && <>
+                                <FormDivider />
+                                <NumberInput
+                                    title="Spam Threshold (msgs)"
+                                    value={storage.spamGuardThreshold ?? 10}
+                                    min={2}
+                                    max={100}
+                                    onCommit={(v) => { storage.spamGuardThreshold = v; }}
+                                />
+                                <FormDivider />
+                                <NumberInput
+                                    title="Cooldown (seconds)"
+                                    value={(storage.spamGuardCooldown ?? 60000) / 1000}
+                                    min={5}
+                                    max={600}
+                                    onCommit={(v) => { storage.spamGuardCooldown = v * 1000; }}
+                                />
+                                <FormRow label={`Hides messages for ${((storage.spamGuardCooldown ?? 60000) / 1000).toFixed(0)}s after ${storage.spamGuardThreshold ?? 10} msgs in 10s`} />
+                            </>}
                             <FormDivider />
                             <S label="Custom Filters" value={!!storage.filtersEnabled} onValueChange={(v) => { storage.filtersEnabled = v; }} />
                             <FormDivider />

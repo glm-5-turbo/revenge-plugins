@@ -40,7 +40,12 @@ function capChannel(channelId: string): void {
 }
 
 export function initGhostPings(): () => void {
-    const ownUserId = getOwnUserId();
+    // Resolve ownUserId lazily — UserStore may not be populated at load time
+    let ownUserId = "";
+    const resolveUserId = () => {
+        if (!ownUserId) ownUserId = getOwnUserId();
+        return ownUserId;
+    };
     const unloads: (() => void)[] = [];
 
     // Hook MESSAGE_CREATE to cache messages for ghost ping detection
@@ -57,7 +62,8 @@ export function initGhostPings(): () => void {
         if (action?.type === "MESSAGE_UPDATE" && action.message) {
             const m = action.message;
             const old = getCached(m.channel_id, m.id);
-            if (old && ownUserId) {
+            const uid = resolveUserId();
+            if (old && uid) {
                 const hadPing =
                     old.content?.includes(`<@${ownUserId}>`) ||
                     old.content?.includes(`<@!${ownUserId}>`);
@@ -84,7 +90,8 @@ export function initGhostPings(): () => void {
     const unDelete = patcher.after("dispatch", FluxDispatcher, (args: any[]) => {
         const action = args[0];
         if (!storage.ghostPings) return;
-        if (!ownUserId) return;
+        const uid = resolveUserId();
+        if (!uid) return;
 
         if (action?.type === "MESSAGE_DELETE") {
             const msgId = action.id;
@@ -92,9 +99,9 @@ export function initGhostPings(): () => void {
             const cached = getCached(channelId, msgId);
             if (cached) {
                 const wasMentioned =
-                    cached.content.includes(`<@${ownUserId}>`) ||
-                    cached.content.includes(`<@!${ownUserId}>`) ||
-                    cached.content.includes(`<@&${ownUserId}>`);
+                    cached.content.includes(`<@${uid}>`) ||
+                    cached.content.includes(`<@!${uid}>`) ||
+                    cached.content.includes(`<@&${uid}>`);
                 if (wasMentioned) {
                     showToast(
                         `👻 Ghost ping from ${cached.authorName}: "${cached.content.slice(0, 80)}${cached.content.length > 80 ? "..." : ""}"`

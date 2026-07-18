@@ -1,5 +1,5 @@
 import { patcher } from "@vendetta";
-import { find, findByName, findByProps, findInReactTree } from "@vendetta/metro";
+import { find, findByName, findByProps } from "@vendetta/metro";
 import { React, ReactNative } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";

@@ -33,10 +33,14 @@ export function initAntiLogKeep(): () => void {
         ownUserId = UserStore?.getCurrentUser()?.id || "";
     } catch {}
 
+    let handlingBulk = false;
+
     const unpatchDelete = patcher.before("dispatch", FluxDispatcher, (args: any[]) => {
         if (!storage.antiLogKeepDeleted) return;
         const action = args[0];
         if (!action) return;
+        // Reentrancy guard for re-dispatched events
+        if (action.type === "__NETHER_GHOST_BLOCKED__") return;
 
         const isDelete = action.type === "MESSAGE_DELETE";
         const isBulk = action.type === "MESSAGE_DELETE_BULK";
@@ -51,9 +55,15 @@ export function initAntiLogKeep(): () => void {
         const store = MessageStore.getMessages(channelId);
 
         let blocked = 0;
+        const blockedIds: string[] = [];
+        const passThroughIds: string[] = [];
+
         for (const id of ids) {
             const msg = store?.get(id);
-            if (!msg || msg.author?.id !== ownUserId) continue;
+            if (!msg || msg.author?.id !== ownUserId) {
+                passThroughIds.push(id);
+                continue;
+            }
 
             // Cache content in MMKV so it survives reloads
             if (!storage.ghostCache) storage.ghostCache = {};
@@ -73,12 +83,36 @@ export function initAntiLogKeep(): () => void {
 
             injected.add(key);
             blocked++;
+            blockedIds.push(id);
         }
 
         if (blocked > 0) {
             showToast(`👻 Anti-log kept ${blocked} deleted message${blocked === 1 ? "" : "s"} locally`);
-            // Block the dispatch so MessageStore doesn't remove the message
-            args[0] = { type: "__NETHER_GHOST_BLOCKED__" };
+
+            if (isDelete) {
+                // Single delete: just block the dispatch
+                args[0] = { type: "__NETHER_GHOST_BLOCKED__" };
+            } else if (isBulk && passThroughIds.length > 0) {
+                // Bulk delete with mixed messages: split into two dispatches.
+                // Block our own messages but let others' deletions through.
+                args[0] = { type: "__NETHER_GHOST_BLOCKED__" };
+                if (!handlingBulk) {
+                    handlingBulk = true;
+                    // Re-dispatch with only the non-own IDs so other users' messages
+                    // actually get removed from the UI
+                    setTimeout(() => {
+                        FluxDispatcher.dispatch({
+                            type: "MESSAGE_DELETE_BULK",
+                            ids: passThroughIds,
+                            channel_id: channelId,
+                        });
+                        handlingBulk = false;
+                    }, 50);
+                }
+            } else {
+                // All messages are ours — just block
+                args[0] = { type: "__NETHER_GHOST_BLOCKED__" };
+            }
         }
     });
 

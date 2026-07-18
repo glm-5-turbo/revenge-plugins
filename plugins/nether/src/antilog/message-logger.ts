@@ -1,4 +1,5 @@
-import { patcher, findByProps } from "@vendetta";
+import { patcher } from "@vendetta";
+import { findByProps, findByStoreName } from "@vendetta/metro";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { storage } from "../storage";
@@ -86,7 +87,10 @@ const EDIT_SEPARATOR = "`[ EDITED ]`"; // Discord renders backticks as inline co
 function patchRowManager(): void {
     try {
         const gen = findByProps("generate", "updateRows") as any;
-        if (!gen?.generate) return;
+        if (!gen?.generate) {
+            logger.log("[Nether] RowManager.generate not found — edit/deleted row highlighting unavailable");
+            return;
+        }
 
         unpatchRows = patcher.after("generate", gen, (_args: any[], ret: any) => {
             if (!storage.messageLogger) return ret;
@@ -97,6 +101,10 @@ function patchRowManager(): void {
                 const key = `${msg.channel_id}:${msg.id}`;
 
                 if (confirmedDeletes.has(key) || msg.__vml_deleted) {
+                    // Set row-level props for the renderer to pick up
+                    if (row.style && typeof row.style === "object") {
+                        row.style = { ...row.style, opacity: 0.6 };
+                    }
                     row.backgroundHighlight = { backgroundColor: RED_BG, gutterColor: RED_GUTTER };
                     msg.edited = "deleted";
                     msg.__vml_deleted = true;
@@ -106,8 +114,9 @@ function patchRowManager(): void {
                 if (edits && edits.length > 0 && !msg.__vml_deleted) {
                     row.backgroundHighlight = { backgroundColor: BLUE_BG, gutterColor: BLUE_GUTTER };
                     msg.edited = `edited (${edits.length})`;
-                    // Render edit history inline below the current content
-                    // (matches the Rain / Surge / Angelix pattern)
+                    // Render edit history inline below the current content.
+                    // Note: this mutates the store message content directly, which
+                    // works because the row generator reads msg.content each pass.
                     if (storage.messageLoggerShowHistory && typeof msg.content === "string") {
                         const history = edits
                             .map((e) => preview(e.content, 200))
@@ -134,7 +143,7 @@ function startSilentDeleteDetector(): void {
     pollInterval = setInterval(() => {
         if (!storage.messageLogger) return;
         try {
-            const { findByStoreName } = require("@vendetta/metro");
+            // Use the already-imported findByStoreName
             const MS = findByStoreName("MessageStore") as any;
             if (!MS) return;
             for (const [channelId, msgs] of Object.entries(cache)) {

@@ -1,4 +1,5 @@
-import { patcher, findAll } from "@vendetta";
+import { patcher } from "@vendetta";
+import { findAll } from "@vendetta/metro";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { storage } from "./storage";
 import { logger } from "@vendetta";
