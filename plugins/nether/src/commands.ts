@@ -13,6 +13,7 @@ const TOGGLES: { key: keyof typeof storage; label: string }[] = [
     { key: "antiTyping", label: "Anti-Typing" },
     { key: "antiRead", label: "Anti-Read Receipts" },
     { key: "antiPurgeLog", label: "Anti-Purge Log" },
+    { key: "antiLogNonce", label: "Anti-Log Nonce" },
     { key: "messageLogger", label: "Message Logger" },
     { key: "antiLogKeepDeleted", label: "Anti-Log Keep Deleted" },
     { key: "autoDeleteEnabled", label: "Auto-Delete" },

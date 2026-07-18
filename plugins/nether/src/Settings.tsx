@@ -140,6 +140,25 @@ export default function SettingsPanel() {
                                 onChange={(v: string) => { storage.antiPurgeLogMessage = v; }}
                             />}
                             <FormDivider />
+                            <S label="Anti-Log Nonce Overlap" value={!!storage.antiLogNonce} onValueChange={(v) => { storage.antiLogNonce = v; }} />
+                            {storage.antiLogNonce && <>
+                                <FormDivider />
+                                <FormInput
+                                    title="Block Message"
+                                    value={String(storage.antiLogNonceBlock)}
+                                    onChange={(v: string) => { storage.antiLogNonceBlock = v; }}
+                                />
+                                <FormDivider />
+                                <NumberInput
+                                    title="Delete Delay (ms)"
+                                    value={storage.antiLogNonceDelay ?? 120}
+                                    min={50}
+                                    max={2000}
+                                    onCommit={(v) => { storage.antiLogNonceDelay = v; }}
+                                />
+                            </>}
+                            <FormRow label="Sends a decoy w/ same nonce to overlap the original" />
+                            <FormDivider />
                             <S label="Message Logger" value={!!storage.messageLogger} onValueChange={(v) => { storage.messageLogger = v; }} />
                             {storage.messageLogger && <>
                                 <FormDivider />
